@@ -1,0 +1,24 @@
+{
+  "title_template": "My Artwork Title",
+  "tags": [
+    "art",
+    "digital",
+    "illustration"
+  ],
+  "is_mature": false,
+  "mature_level": null,
+  "mature_classification": [],
+  "is_ai_generated": false,
+  "noai": false,
+  "display_resolution": 0,
+  "add_watermark": false,
+  "allow_free_download": false,
+  "allow_comments": true,
+  "feature": true,
+  "gallery_id": 1,
+  "artist_comments": null,
+  "original_url": null,
+  "is_dirty": false,
+  "stack": null,
+  "stackid": null
+}

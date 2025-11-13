@@ -1,0 +1,228 @@
+"""Database schema and initialization."""
+import sqlite3
+from pathlib import Path
+
+
+DATABASE_SCHEMA = """
+-- Users table: stores DeviantArt user information
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userid TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    usericon TEXT,
+    type TEXT NOT NULL,
+    
+    -- Extended profile information
+    is_watching INTEGER,
+    profile_url TEXT,
+    user_is_artist INTEGER,
+    artist_level TEXT,
+    artist_specialty TEXT,
+    real_name TEXT,
+    tagline TEXT,
+    country_id INTEGER,
+    country TEXT,
+    website TEXT,
+    bio TEXT,
+    
+    -- Statistics
+    user_deviations INTEGER,
+    user_favourites INTEGER,
+    user_comments INTEGER,
+    profile_pageviews INTEGER,
+    profile_comments INTEGER,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for faster user lookups by userid
+CREATE INDEX IF NOT EXISTS idx_users_userid ON users(userid);
+
+-- Index for faster user lookups by username
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+-- OAuth tokens table: stores access and refresh tokens
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    token_type TEXT NOT NULL DEFAULT 'Bearer',
+    expires_at TIMESTAMP NOT NULL,
+    scope TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Index for faster token lookups by user_id
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user_id ON oauth_tokens(user_id);
+
+-- Galleries table: stores DeviantArt gallery folders
+CREATE TABLE IF NOT EXISTS galleries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    folderid TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    parent TEXT,
+    size INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Index for faster gallery lookups by folderid
+CREATE INDEX IF NOT EXISTS idx_galleries_folderid ON galleries(folderid);
+
+-- Index for faster gallery lookups by user_id
+CREATE INDEX IF NOT EXISTS idx_galleries_user_id ON galleries(user_id);
+
+-- Deviations table: tracks uploaded deviations
+CREATE TABLE IF NOT EXISTS deviations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    filename TEXT NOT NULL,
+    title TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    
+    -- DeviantArt submission parameters
+    is_mature INTEGER NOT NULL DEFAULT 0,
+    mature_level TEXT,
+    mature_classification TEXT,  -- JSON array
+    feature INTEGER DEFAULT 1,
+    allow_comments INTEGER DEFAULT 1,
+    display_resolution INTEGER DEFAULT 0,
+    tags TEXT,  -- JSON array
+    allow_free_download INTEGER DEFAULT 0,
+    add_watermark INTEGER DEFAULT 0,
+    is_ai_generated INTEGER DEFAULT 0,
+    noai INTEGER DEFAULT 0,
+    
+    -- Stash submit parameters
+    artist_comments TEXT,  -- Additional information about the submission
+    original_url TEXT,  -- Link to original if posted elsewhere
+    is_dirty INTEGER DEFAULT 0,  -- Flag to warn users that item is being edited
+    stack TEXT,  -- Stack name to place submission in
+    stackid INTEGER,  -- Stack ID to place submission in
+    
+    -- Upload results
+    itemid INTEGER,  -- Stash item ID
+    gallery_id INTEGER,  -- Internal DB ID of gallery (references galleries table)
+    deviationid TEXT,  -- UUID from DeviantArt
+    url TEXT,  -- Published deviation URL
+    error TEXT,
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    uploaded_at TIMESTAMP,
+    
+    UNIQUE(filename),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Index for faster status queries
+CREATE INDEX IF NOT EXISTS idx_deviations_status ON deviations(status);
+
+-- Index for faster filename lookups
+CREATE INDEX IF NOT EXISTS idx_deviations_filename ON deviations(filename);
+
+-- Index for faster deviation lookups by user_id
+CREATE INDEX IF NOT EXISTS idx_deviations_user_id ON deviations(user_id);
+"""
+
+
+def _migrate_database(conn: sqlite3.Connection) -> None:
+    """
+    Migrate existing database to add missing columns.
+    
+    This function checks for missing columns in tables and adds them 
+    if they don't exist. This ensures backward compatibility with 
+    databases created before new fields were added.
+    
+    Args:
+        conn: Database connection
+    """
+    # Migration 1: Add Stash submit fields to deviations table
+    cursor = conn.execute("PRAGMA table_info(deviations)")
+    deviation_columns = {row[1] for row in cursor.fetchall()}
+    
+    stash_columns = {
+        'artist_comments': 'TEXT',
+        'original_url': 'TEXT',
+        'is_dirty': 'INTEGER DEFAULT 0',
+        'stack': 'TEXT',
+        'stackid': 'INTEGER'
+    }
+    
+    for column_name, column_type in stash_columns.items():
+        if column_name not in deviation_columns:
+            try:
+                conn.execute(f"ALTER TABLE deviations ADD COLUMN {column_name} {column_type}")
+                conn.commit()
+                print(f"✓ Migration: Added column deviations.{column_name}")
+            except sqlite3.OperationalError as e:
+                print(f"Warning: Could not add column deviations.{column_name}: {e}")
+    
+    # Migration 2: Add user_id foreign keys to existing tables
+    # Check and add user_id to oauth_tokens
+    cursor = conn.execute("PRAGMA table_info(oauth_tokens)")
+    token_columns = {row[1] for row in cursor.fetchall()}
+    if 'user_id' not in token_columns:
+        try:
+            conn.execute("ALTER TABLE oauth_tokens ADD COLUMN user_id INTEGER")
+            conn.commit()
+            print(f"✓ Migration: Added column oauth_tokens.user_id")
+        except sqlite3.OperationalError as e:
+            print(f"Warning: Could not add column oauth_tokens.user_id: {e}")
+    
+    # Check and add user_id to galleries
+    cursor = conn.execute("PRAGMA table_info(galleries)")
+    gallery_columns = {row[1] for row in cursor.fetchall()}
+    if 'user_id' not in gallery_columns:
+        try:
+            conn.execute("ALTER TABLE galleries ADD COLUMN user_id INTEGER")
+            conn.commit()
+            print(f"✓ Migration: Added column galleries.user_id")
+        except sqlite3.OperationalError as e:
+            print(f"Warning: Could not add column galleries.user_id: {e}")
+    
+    # Check and add user_id to deviations (refresh column list first)
+    cursor = conn.execute("PRAGMA table_info(deviations)")
+    deviation_columns = {row[1] for row in cursor.fetchall()}
+    if 'user_id' not in deviation_columns:
+        try:
+            conn.execute("ALTER TABLE deviations ADD COLUMN user_id INTEGER")
+            conn.commit()
+            print(f"✓ Migration: Added column deviations.user_id")
+        except sqlite3.OperationalError as e:
+            print(f"Warning: Could not add column deviations.user_id: {e}")
+
+
+def init_database(db_path: str | Path) -> sqlite3.Connection:
+    """
+    Initialize database with schema.
+    
+    Args:
+        db_path: Path to SQLite database file
+        
+    Returns:
+        Database connection
+    """
+    db_path = Path(db_path)
+    
+    # Ensure data directory exists
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Connect and enable foreign keys
+    conn = sqlite3.Connection(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    
+    # Initialize schema
+    conn.executescript(DATABASE_SCHEMA)
+    conn.commit()
+    
+    # Migrate existing database (add missing columns if needed)
+    _migrate_database(conn)
+    
+    return conn
