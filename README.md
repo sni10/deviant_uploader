@@ -1,12 +1,14 @@
 # Загрузчик изображений на DeviantArt
 
-[![CI](https://github.com/sni10/deviant_uploader/workflows/CI/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-passed-brightgreen.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Release](https://github.com/sni10/deviant_uploader/workflows/Release/badge.svg)](https://github.com/sni10/deviant_uploader/releases)
-[![Python Version](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader)](https://github.com/sni10/deviant_uploader/releases/latest)
-[![Code Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![CI](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Release](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green?logo=opensourceinitiative&logoColor=white)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader?logo=github)](https://github.com/sni10/deviant_uploader/releases/latest)
+[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen?logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+
+
 
 Простое синхронное Python-приложение для загрузки изображений на DeviantArt через OAuth2 API. Приложение следует принципам DDD, SOLID, OOP, DRY и KISS с четким разделением ответственности.
 
