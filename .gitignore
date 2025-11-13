@@ -81,3 +81,4 @@ cython_debug/
 # Project-specific files
 upload_template.json
 .junie/
+/.claude/
