@@ -1,6 +1,7 @@
 """Service for fetching and persisting deviation statistics."""
 from datetime import date
 import re
+import time
 from logging import Logger
 from typing import Optional
 
@@ -14,6 +15,12 @@ class StatsService:
     """Coordinates DeviantArt stats collection."""
 
     BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
+    # Maximum number of exponential backoff retries on DeviantArt rate limits
+    # (HTTP 429 / user_api_threshold). This controls how many times we will
+    # wait and retry a single /deviation/{id} call before giving up for the
+    # current sync run.
+    RATE_LIMIT_MAX_RETRIES = 10
+    RATE_LIMIT_INITIAL_DELAY = 1.0  # seconds
 
     def __init__(
         self,
@@ -24,6 +31,28 @@ class StatsService:
         self.stats_repository = stats_repository
         self.deviation_repository = deviation_repository
         self.logger = logger
+
+    @staticmethod
+    def _is_rate_limited_response(response: requests.Response) -> bool:  # type: ignore[type-arg]
+        """Return True if the DeviantArt API signalled a rate limit.
+
+        The DeviantArt API can communicate rate limiting either via an HTTP
+        429 status code or via a JSON payload with ``error`` set to
+        ``"user_api_threshold"`` while still returning another 4xx/5xx code.
+        """
+
+        if getattr(response, "status_code", None) == 429:
+            return True
+
+        try:
+            data = response.json()
+        except Exception:  # noqa: BLE001
+            return False
+
+        if isinstance(data, dict) and data.get("error") == "user_api_threshold":
+            return True
+
+        return False
 
     @staticmethod
     def _slugify_title(title: str) -> str:
@@ -64,6 +93,14 @@ class StatsService:
         url = f"{self.BASE_URL}/gallery/{folderid}"
         offset = 0
         all_items: list[dict] = []
+        rate_limited = False
+
+        self.logger.info(
+            "Fetching gallery items for folder %s (username=%s, mode=%s)",
+            folderid,
+            username or "-",
+            mode,
+        )
 
         while True:
             params: dict[str, str | int] = {
@@ -76,12 +113,69 @@ class StatsService:
             if username:
                 params["username"] = username
 
-            response = requests.get(url, params=params)
-            response.raise_for_status()
+            attempts = 0
+            delay = self.RATE_LIMIT_INITIAL_DELAY
+
+            while True:
+                response = requests.get(url, params=params)
+                try:
+                    response.raise_for_status()
+                except requests.HTTPError as exc:  # noqa: BLE001
+                    is_rate_limited = self._is_rate_limited_response(response)
+
+                    if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
+                        attempts += 1
+                        self.logger.warning(
+                            "Gallery fetch rate-limited for folder %s at offset %s "
+                            "(attempt %s/%s), backing off for %.1f seconds.",
+                            folderid,
+                            offset,
+                            attempts,
+                            self.RATE_LIMIT_MAX_RETRIES,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        delay *= 2
+                        continue
+
+                    if is_rate_limited:
+                        self.logger.error(
+                            "Gallery fetch rate-limited for folder %s at offset %s "
+                            "after %s attempts: %s",
+                            folderid,
+                            offset,
+                            attempts + 1,
+                            response.text or response.reason,
+                        )
+                        rate_limited = True
+                        break
+
+                    # Non rate-limit error: keep previous behaviour and surface
+                    # the HTTPError to the caller.
+                    self.logger.error(
+                        "Gallery fetch failed for folder %s at offset %s: %s",
+                        folderid,
+                        offset,
+                        response.text or response.reason,
+                    )
+                    raise exc
+
+                break
+
+            if rate_limited:
+                break
+
             payload = response.json()
 
             results = payload.get("results", [])
             all_items.extend(results)
+
+            self.logger.debug(
+                "Fetched %d items at offset %d for folder %s",
+                len(results),
+                offset,
+                folderid,
+            )
 
             if not payload.get("has_more"):
                 break
@@ -90,6 +184,10 @@ class StatsService:
                 break
             offset = next_offset
 
+        self.logger.info(
+            "Loaded %d deviations from gallery folder %s", len(all_items), folderid
+        )
+
         return all_items
 
     def _fetch_metadata(self, access_token: str, deviationids: list[str]) -> list[dict]:
@@ -97,9 +195,12 @@ class StatsService:
 
         url = f"{self.BASE_URL}/deviation/metadata"
         all_meta: list[dict] = []
+        rate_limited = False
 
         # DeviantArt limits ext_stats batches to 10 items
         batch_size = 10
+
+        self.logger.info("Fetching metadata for %d deviations", len(deviationids))
 
         for i in range(0, len(deviationids), batch_size):
             batch = deviationids[i : i + batch_size]
@@ -114,15 +215,61 @@ class StatsService:
                 "deviationids[]": batch,
             }
 
-            response = requests.get(url, params=params)
-            try:
-                response.raise_for_status()
-            except requests.HTTPError as exc:  # noqa: BLE001
-                # Include response text to ease debugging of API rejections
-                self.logger.error(
-                    "Metadata fetch failed: %s", response.text or response.reason
-                )
-                raise exc
+            self.logger.debug(
+                "Fetching metadata batch %d-%d (size=%d)",
+                i,
+                i + len(batch) - 1,
+                len(batch),
+            )
+
+            attempts = 0
+            delay = self.RATE_LIMIT_INITIAL_DELAY
+
+            while True:
+                response = requests.get(url, params=params)
+                try:
+                    response.raise_for_status()
+                except requests.HTTPError as exc:  # noqa: BLE001
+                    is_rate_limited = self._is_rate_limited_response(response)
+
+                    if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
+                        attempts += 1
+                        self.logger.warning(
+                            "Metadata fetch rate-limited for batch starting at %d "
+                            "(attempt %d/%d), backing off for %.1f seconds.",
+                            i,
+                            attempts,
+                            self.RATE_LIMIT_MAX_RETRIES,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        delay *= 2
+                        continue
+
+                    if is_rate_limited:
+                        self.logger.error(
+                            "Metadata fetch rate-limited for batch starting at %d "
+                            "after %d attempts: %s",
+                            i,
+                            attempts + 1,
+                            response.text or response.reason,
+                        )
+                        rate_limited = True
+                        break
+
+                    # Non rate-limit error: preserve previous behaviour and
+                    # surface the HTTPError to the caller.
+                    self.logger.error(
+                        "Metadata fetch failed for batch starting at %d: %s",
+                        i,
+                        response.text or response.reason,
+                    )
+                    raise exc
+
+                break
+
+            if rate_limited:
+                break
 
             payload = response.json()
             all_meta.extend(payload.get("metadata", []))
@@ -138,10 +285,21 @@ class StatsService:
         iterate over the identifiers but keep the logic encapsulated here. The
         result is a mapping ``deviationid -> payload``.
         """
-
         details: dict[str, dict] = {}
+        rate_limited = False
+
+        self.logger.info(
+            "Fetching detailed deviation data for %d deviations", len(deviationids)
+        )
 
         for deviationid in deviationids:
+            if rate_limited:
+                # Once DeviantArt has signalled a user-level rate limit, we
+                # stop issuing further detail requests in this sync run.
+                break
+
+            self.logger.debug("Requesting details for deviation %s", deviationid)
+
             url = f"{self.BASE_URL}/deviation/{deviationid}"
             params: dict[str, str] = {
                 "access_token": access_token,
@@ -149,21 +307,76 @@ class StatsService:
                 "with_session": "false",
             }
 
-            response = requests.get(url, params=params)
-            try:
-                response.raise_for_status()
-            except requests.HTTPError as exc:  # noqa: BLE001
-                # Log and continue; stats sync should be best-effort.
-                self.logger.error(
-                    "Deviation fetch failed for %s: %s",
-                    deviationid,
-                    response.text or response.reason,
-                )
-                continue
+            attempts = 0
+            delay = self.RATE_LIMIT_INITIAL_DELAY
 
-            payload = response.json()
-            if isinstance(payload, dict):
-                details[deviationid] = payload
+            while True:
+                response = requests.get(url, params=params)
+                try:
+                    response.raise_for_status()
+                except requests.HTTPError:  # noqa: BLE001
+                    # Detect DeviantArt adaptive rate limit (HTTP 429 or
+                    # user_api_threshold error payload).
+                    is_rate_limited = response.status_code == 429
+                    payload_json: dict | None = None
+                    try:
+                        data = response.json()
+                        if isinstance(data, dict):
+                            payload_json = data
+                    except Exception:  # noqa: BLE001
+                        payload_json = None
+
+                    if (
+                        not is_rate_limited
+                        and isinstance(payload_json, dict)
+                        and payload_json.get("error") == "user_api_threshold"
+                    ):
+                        is_rate_limited = True
+
+                    if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
+                        attempts += 1
+                        self.logger.warning(
+                            "Deviation fetch rate-limited for %s (attempt %s/%s), "
+                            "backing off for %.1f seconds.",
+                            deviationid,
+                            attempts,
+                            self.RATE_LIMIT_MAX_RETRIES,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        delay *= 2
+                        continue
+
+                    if is_rate_limited:
+                        # Exhausted backoff attempts for this deviation; stop
+                        # the whole detail pass for the current sync run.
+                        self.logger.error(
+                            "Deviation fetch rate-limited at %s after %s attempts: %s",
+                            deviationid,
+                            attempts + 1,
+                            response.text or response.reason,
+                        )
+                        rate_limited = True
+                        break
+
+                    # Non rate-limit error: log and continue with next
+                    # deviation without retries.
+                    self.logger.error(
+                        "Deviation fetch failed for %s: %s",
+                        deviationid,
+                        response.text or response.reason,
+                    )
+                    break
+
+                payload = response.json()
+                if isinstance(payload, dict):
+                    self.logger.debug(
+                        "Received details for deviation %s (published_time=%s)",
+                        deviationid,
+                        payload.get("published_time"),
+                    )
+                    details[deviationid] = payload
+                break
 
         return details
 
@@ -181,10 +394,16 @@ class StatsService:
             folderid: DeviantArt gallery folder identifier.
             username: Optional DeviantArt username (for shared galleries).
             include_deviations: If True, also fetch /deviation/{id} details and
-                enrich the local deviations table (heavier, more API calls).
+            enrich the local deviations table (heavier, more API calls).
         """
 
         today = date.today().isoformat()
+        self.logger.info(
+            "Starting stats sync for folder %s (username=%s, include_deviations=%s)",
+            folderid,
+            username or "-",
+            include_deviations,
+        )
         deviations = self._fetch_gallery_items(access_token, folderid, username=username)
 
         deviation_map: dict[str, dict] = {}
@@ -204,7 +423,14 @@ class StatsService:
                 "url": item.get("url"),
             }
 
+        self.logger.info(
+            "Resolved %d deviations with IDs in folder %s",
+            len(deviation_map),
+            folderid,
+        )
+
         if not deviation_map:
+            self.logger.info("No deviations found for folder %s; nothing to sync.", folderid)
             return {"synced": 0, "date": today}
 
         keys = list(deviation_map.keys())
@@ -231,6 +457,14 @@ class StatsService:
 
             if not is_mature:
                 is_mature = bool(basic.get("is_mature"))
+
+            self.logger.debug(
+                "Processing deviation %s: views=%d, favourites=%d, comments=%d",
+                deviationid,
+                stats.get("views", 0),
+                stats.get("favourites", 0),
+                stats.get("comments", 0),
+            )
 
             self.stats_repository.save_deviation_stats(
                 deviationid=deviationid,
@@ -261,6 +495,11 @@ class StatsService:
                     try:
                         self.deviation_repository.update_published_time_by_deviationid(
                             deviationid, published_time
+                        )
+                        self.logger.info(
+                            "Updated deviation %s published_time to %s",
+                            deviationid,
+                            published_time,
                         )
                     except Exception as exc:  # noqa: BLE001
                         self.logger.error(
@@ -301,6 +540,16 @@ class StatsService:
                 stats_comments=stats.get("comments"),
             )
 
+            self.logger.debug(
+                "Saved stats, snapshot and metadata for deviation %s (title=%r)",
+                deviationid,
+                basic.get("title") or meta.get("title") or "Untitled",
+            )
+        self.logger.info(
+            "Finished stats sync for folder %s: processed %d deviations",
+            folderid,
+            len(deviation_map),
+        )
         return {"synced": len(deviation_map), "date": today}
 
     def get_stats_with_diff(self) -> list[dict]:

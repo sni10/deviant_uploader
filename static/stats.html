@@ -168,15 +168,34 @@
             renderTable();
         }
 
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            if (Number.isNaN(date.getTime())) {
+                return dateStr;
+            }
+            return date.toLocaleString();
+        }
+
         function applySort() {
             const { column, direction } = sortConfig;
             statsData.sort((a, b) => {
-                const valA = column === 'combined'
-                    ? (a.views || 0) + (a.favourites || 0) * 10
-                    : (a[column] || 0);
-                const valB = column === 'combined'
-                    ? (b.views || 0) + (b.favourites || 0) * 10
-                    : (b[column] || 0);
+                let valA;
+                let valB;
+
+                if (column === 'combined') {
+                    valA = (a.views || 0) + (a.favourites || 0) * 10;
+                    valB = (b.views || 0) + (b.favourites || 0) * 10;
+                } else if (column === 'creation_time') {
+                    const dA = a.creation_time ? new Date(a.creation_time).getTime() : 0;
+                    const dB = b.creation_time ? new Date(b.creation_time).getTime() : 0;
+                    valA = Number.isNaN(dA) ? 0 : dA;
+                    valB = Number.isNaN(dB) ? 0 : dB;
+                } else {
+                    valA = a[column] || 0;
+                    valB = b[column] || 0;
+                }
+
                 return direction === 'asc' ? valA - valB : valB - valA;
             });
         }
@@ -191,6 +210,7 @@
                 const titleCell = url
                     ? `<a href="${url}" target="_blank" rel="noopener">${row.title || 'Untitled'}</a>`
                     : (row.title || 'Untitled');
+                const publishedAt = row.creation_time ? formatDate(row.creation_time) : '-';
 
                 return `
                     <tr>
@@ -204,6 +224,7 @@
                         <td>${row.comments ?? 0}</td>
                         <td>${formatDiff(row.comments_diff ?? 0)}</td>
                         <td>${(row.views || 0) + (row.favourites || 0) * 10}</td>
+                        <td>${publishedAt}</td>
                     </tr>
                 `;
             }).join('');
@@ -222,9 +243,10 @@
                             <th class="${getSortClass('comments')}" onclick="sortBy('comments')">Comments</th>
                             <th>Δ</th>
                             <th class="${getSortClass('combined')}" onclick="combinedSort()">Score</th>
+                            <th class="${getSortClass('creation_time')}" onclick="sortBy('creation_time')">Published</th>
                         </tr>
                     </thead>
-                    <tbody>${rows || '<tr><td colspan="10">No data</td></tr>'}</tbody>
+                    <tbody>${rows || '<tr><td colspan="11">No data</td></tr>'}</tbody>
                 </table>`;
 
             document.getElementById('stats-table').innerHTML = table;
