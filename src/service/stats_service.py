@@ -6,6 +6,7 @@ from typing import Optional
 
 import requests
 
+from ..storage.deviation_repository import DeviationRepository
 from ..storage.stats_repository import StatsRepository
 
 
@@ -14,8 +15,14 @@ class StatsService:
 
     BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
 
-    def __init__(self, stats_repository: StatsRepository, logger: Logger):
+    def __init__(
+        self,
+        stats_repository: StatsRepository,
+        deviation_repository: DeviationRepository,
+        logger: Logger,
+    ) -> None:
         self.stats_repository = stats_repository
+        self.deviation_repository = deviation_repository
         self.logger = logger
 
     @staticmethod
@@ -122,8 +129,60 @@ class StatsService:
 
         return all_meta
 
-    def sync_gallery(self, access_token: str, folderid: str, username: Optional[str] = None) -> dict:
-        """Fetch gallery deviations, pull stats, persist current and snapshot."""
+    def _fetch_deviation_details(
+        self, access_token: str, deviationids: list[str]
+    ) -> dict[str, dict]:
+        """Fetch detailed deviation data (including published_time) per deviation.
+
+        DeviantArt does not provide a true batch endpoint for this call, so we
+        iterate over the identifiers but keep the logic encapsulated here. The
+        result is a mapping ``deviationid -> payload``.
+        """
+
+        details: dict[str, dict] = {}
+
+        for deviationid in deviationids:
+            url = f"{self.BASE_URL}/deviation/{deviationid}"
+            params: dict[str, str] = {
+                "access_token": access_token,
+                "mature_content": "true",
+                "with_session": "false",
+            }
+
+            response = requests.get(url, params=params)
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:  # noqa: BLE001
+                # Log and continue; stats sync should be best-effort.
+                self.logger.error(
+                    "Deviation fetch failed for %s: %s",
+                    deviationid,
+                    response.text or response.reason,
+                )
+                continue
+
+            payload = response.json()
+            if isinstance(payload, dict):
+                details[deviationid] = payload
+
+        return details
+
+    def sync_gallery(
+        self,
+        access_token: str,
+        folderid: str,
+        username: Optional[str] = None,
+        include_deviations: bool = False,
+    ) -> dict:
+        """Fetch gallery deviations, pull stats, persist current and snapshot.
+
+        Args:
+            access_token: OAuth2 access token.
+            folderid: DeviantArt gallery folder identifier.
+            username: Optional DeviantArt username (for shared galleries).
+            include_deviations: If True, also fetch /deviation/{id} details and
+                enrich the local deviations table (heavier, more API calls).
+        """
 
         today = date.today().isoformat()
         deviations = self._fetch_gallery_items(access_token, folderid, username=username)
@@ -148,12 +207,19 @@ class StatsService:
         if not deviation_map:
             return {"synced": 0, "date": today}
 
-        metadata = self._fetch_metadata(access_token, list(deviation_map.keys()))
+        keys = list(deviation_map.keys())
+        metadata = self._fetch_metadata(access_token, keys)
+        deviation_details: dict[str, dict]
+        if include_deviations:
+            deviation_details = self._fetch_deviation_details(access_token, keys)
+        else:
+            deviation_details = {}
         for meta in metadata:
             deviationid = meta.get("deviationid")
             stats = meta.get("stats", {}) if meta else {}
             submission = meta.get("submission") or {}
             basic = deviation_map.get(deviationid, {})
+            details = deviation_details.get(deviationid, {}) if include_deviations else {}
             if meta is not None:
                 is_mature = bool(
                     meta.get("is_mature")
@@ -185,6 +251,23 @@ class StatsService:
                 favourites=stats.get("favourites", 0),
                 comments=stats.get("comments", 0),
             )
+
+            # Optionally enrich the deviations table with publication time from
+            # /deviation/{deviationid}. This may be expensive, so it is only
+            # executed when explicitly requested by the caller.
+            if include_deviations:
+                published_time = details.get("published_time") if details else None
+                if published_time is not None:
+                    try:
+                        self.deviation_repository.update_published_time_by_deviationid(
+                            deviationid, published_time
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.error(
+                            "Failed to update published_time for deviation %s: %s",
+                            deviationid,
+                            exc,
+                        )
 
             self.stats_repository.save_metadata(
                 deviationid=deviationid,

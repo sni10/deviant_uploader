@@ -28,9 +28,11 @@ log_level = getattr(logging, config.log_level.upper(), logging.INFO)
 logger = setup_logger(name="stats_api", log_dir=config.log_dir, level=log_level)
 
 # Create repositories and services (shared DB connection)
-user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories(config.database_path)
+user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories(
+    config.database_path
+)
 auth_service = AuthService(token_repo, logger)
-stats_service = StatsService(stats_repo, logger)
+stats_service = StatsService(stats_repo, deviation_repo, logger)
 
 
 app = Flask(__name__, static_folder=str(STATIC_DIR))
@@ -60,6 +62,7 @@ def sync_stats():
         payload = request.get_json(silent=True) or {}
         folderid = (payload.get("folderid") or "").strip()
         username = payload.get("username")
+        include_deviations = bool(payload.get("include_deviations"))
 
         if not folderid:
             return jsonify({"success": False, "error": "folderid is required"}), 400
@@ -72,7 +75,12 @@ def sync_stats():
         if not access_token:
             return jsonify({"success": False, "error": "Failed to obtain access token"}), 401
 
-        result = stats_service.sync_gallery(access_token, folderid, username=username)
+        result = stats_service.sync_gallery(
+            access_token,
+            folderid,
+            username=username,
+            include_deviations=include_deviations,
+        )
         return jsonify({"success": True, "data": result})
     except Exception as exc:  # noqa: BLE001 (surface error to caller)
         logger.error("Failed to sync stats", exc_info=exc)
