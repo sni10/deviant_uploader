@@ -95,4 +95,81 @@ class Deviation:
     error: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
     uploaded_at: Optional[datetime] = None
+    # Publication information returned by DeviantArt API (/deviation/{deviationid})
+    # Stored as raw string from API (e.g. "2024-12-07T21:15:00Z") to avoid
+    # assumptions about timezone handling at this layer.
+    published_time: Optional[str] = None
     deviation_id: Optional[int] = None  # DB identifier
+
+
+@dataclass
+class DeviationStats:
+    """Represents aggregated statistics for a deviation."""
+
+    deviationid: str
+    title: str
+    is_mature: bool = False
+    views: int = 0
+    favourites: int = 0
+    comments: int = 0
+    thumb_url: Optional[str] = None
+    gallery_folderid: Optional[str] = None
+
+    # Database fields
+    stats_id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class StatsSnapshot:
+    """Represents a daily snapshot of deviation statistics."""
+
+    deviationid: str
+    snapshot_date: str  # YYYY-MM-DD
+    views: int = 0
+    favourites: int = 0
+    comments: int = 0
+
+    snapshot_id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class DeviationMetadata:
+    """Represents extended metadata fetched from DeviantArt."""
+
+    deviationid: str
+    title: str
+    description: Optional[str] = None
+    license: Optional[str] = None
+    allows_comments: Optional[bool] = None
+    tags: list[dict] = field(default_factory=list)
+    is_favourited: Optional[bool] = None
+    is_watching: Optional[bool] = None
+    is_mature: Optional[bool] = None
+    mature_level: Optional[str] = None
+    mature_classification: list[str] = field(default_factory=list)
+    printid: Optional[str] = None
+    author: Optional[dict] = None
+    creation_time: Optional[str] = None
+    category: Optional[str] = None
+    file_size: Optional[str] = None
+    resolution: Optional[str] = None
+    submitted_with: Optional[dict] = None
+    stats: Optional[dict] = None
+    camera: Optional[dict] = None
+    collections: list[dict] = field(default_factory=list)
+    galleries: list[dict] = field(default_factory=list)
+    can_post_comment: Optional[bool] = None
+    stats_views_today: Optional[int] = None
+    stats_downloads_today: Optional[int] = None
+    stats_downloads: Optional[int] = None
+    stats_views: Optional[int] = None
+    stats_favourites: Optional[int] = None
+    stats_comments: Optional[int] = None
+
+    metadata_id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)

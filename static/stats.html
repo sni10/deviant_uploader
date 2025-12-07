@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeviantArt Stats Dashboard</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+        }
+        body { font-family: Arial, sans-serif; margin: 16px; }
+        h2 { margin-bottom: 12px; }
+        .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .controls input { padding: 8px; min-width: 280px; }
+        .controls button { padding: 8px 14px; cursor: pointer; }
+        #status { padding: 10px; margin-bottom: 12px; border-radius: 4px; background: #f0f0f0; color: #222; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { padding: 8px; border: 1px solid #ccc; text-align: left; }
+        th { background: #4a4a4a; color: #fff; cursor: pointer; }
+        th.sortable::after { content: " \2195"; opacity: .6; }
+        th.sort-asc::after { content: " \2191"; }
+        th.sort-desc::after { content: " \2193"; }
+        .thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; }
+        .positive { color: #0a7f1f; }
+        .negative { color: #b00020; }
+        @media (max-width: 720px) {
+            th, td { font-size: 13px; }
+            .controls input { min-width: 200px; }
+        }
+    </style>
+</head>
+<body>
+    <h2>DeviantArt Stats Dashboard</h2>
+
+    <div class="controls">
+        <select id="user-select"></select>
+        <select id="gallery-select"></select>
+        <button onclick="syncStats()">🔄 Sync from DeviantArt</button>
+        <button onclick="loadStats()">📊 Refresh Table</button>
+        <button onclick="combinedSort()">⭐ Sort by Score</button>
+    </div>
+
+    <div id="status">Ready.</div>
+
+    <div id="stats-table"></div>
+
+    <script>
+        let statsData = [];
+        let sortConfig = { column: 'views', direction: 'desc' };
+        let optionsCache = { users: [], galleries: [] };
+
+        function setStatus(message, isError = false) {
+            const el = document.getElementById('status');
+            el.textContent = message;
+            el.style.background = isError ? '#ffdddd' : '#ddffdd';
+            el.style.color = isError ? '#900' : '#040';
+        }
+
+        async function loadStats() {
+            setStatus('Loading stats...');
+            try {
+                const resp = await fetch('/api/stats');
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.error || 'Unknown error');
+                statsData = json.data || [];
+                applySort();
+                renderTable();
+                setStatus(`Loaded ${statsData.length} deviations`);
+            } catch (e) {
+                setStatus('Error: ' + e.message, true);
+            }
+        }
+
+        async function syncStats() {
+            const folderid = document.getElementById('gallery-select').value;
+            const username = document.getElementById('user-select').value;
+            if (!folderid) {
+                setStatus('Please select a gallery', true);
+                return;
+            }
+            setStatus('Syncing...');
+            try {
+                const resp = await fetch('/api/stats/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folderid, username: username || undefined })
+                });
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.error || 'Unknown error');
+                setStatus(`Synced ${json.data.synced} deviations for ${json.data.date}`);
+                await loadStats();
+            } catch (e) {
+                setStatus('Error: ' + e.message, true);
+            }
+        }
+
+        async function loadOptions() {
+            setStatus('Loading options...');
+            try {
+                const resp = await fetch('/api/options');
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.error || 'Unable to load options');
+
+                optionsCache = json.data || { users: [], galleries: [] };
+                populateSelect('user-select', optionsCache.users, (u) => ({ value: u.username, label: `${u.username}` }));
+                populateSelect('gallery-select', optionsCache.galleries, (g) => ({ value: g.folderid, label: `${g.name} (${g.folderid})` }));
+
+                setStatus('Options loaded');
+            } catch (e) {
+                setStatus('Error loading options: ' + e.message, true);
+            }
+        }
+
+        function populateSelect(id, items, mapFn) {
+            const select = document.getElementById(id);
+            select.innerHTML = '';
+            if (!items || items.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No data';
+                select.appendChild(opt);
+                return;
+            }
+            for (const item of items) {
+                const mapped = mapFn(item);
+                const opt = document.createElement('option');
+                opt.value = mapped.value;
+                opt.textContent = mapped.label;
+                select.appendChild(opt);
+            }
+        }
+
+        function formatDiff(value) {
+            if (value > 0) return `<span class="positive">+${value}</span>`;
+            if (value < 0) return `<span class="negative">${value}</span>`;
+            return '0';
+        }
+
+        function getSortClass(column) {
+            if (sortConfig.column !== column) return 'sortable';
+            return sortConfig.direction === 'asc' ? 'sort-asc' : 'sort-desc';
+        }
+
+        function sortBy(column) {
+            if (sortConfig.column === column) {
+                sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortConfig.column = column;
+                sortConfig.direction = 'desc';
+            }
+            applySort();
+            renderTable();
+        }
+
+        function combinedSort() {
+            sortConfig = { column: 'combined', direction: 'desc' };
+            applySort();
+            renderTable();
+        }
+
+        function applySort() {
+            const { column, direction } = sortConfig;
+            statsData.sort((a, b) => {
+                const valA = column === 'combined'
+                    ? (a.views || 0) + (a.favourites || 0) * 10
+                    : (a[column] || 0);
+                const valB = column === 'combined'
+                    ? (b.views || 0) + (b.favourites || 0) * 10
+                    : (b[column] || 0);
+                return direction === 'asc' ? valA - valB : valB - valA;
+            });
+        }
+
+        function renderTable() {
+            const rows = statsData.map((row) => {
+                const url = row.url || null;
+                const thumb = row.thumb_url
+                    ? `<img class="thumb" src="${row.thumb_url}" alt="thumb" />`
+                    : '-';
+                const thumbCell = url ? `<a href="${url}" target="_blank" rel="noopener">${thumb}</a>` : thumb;
+                const titleCell = url
+                    ? `<a href="${url}" target="_blank" rel="noopener">${row.title || 'Untitled'}</a>`
+                    : (row.title || 'Untitled');
+
+                return `
+                    <tr>
+                        <td>${thumbCell}</td>
+                        <td>${titleCell}</td>
+                        <td>${row.is_mature ? '<span class="badge-mature">🔞</span>' : ''}</td>
+                        <td>${row.views ?? 0}</td>
+                        <td>${formatDiff(row.views_diff ?? 0)}</td>
+                        <td>${row.favourites ?? 0}</td>
+                        <td>${formatDiff(row.favourites_diff ?? 0)}</td>
+                        <td>${row.comments ?? 0}</td>
+                        <td>${formatDiff(row.comments_diff ?? 0)}</td>
+                        <td>${(row.views || 0) + (row.favourites || 0) * 10}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            const table = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Thumb</th>
+                            <th>Title</th>
+                            <th>Mature</th>
+                            <th class="${getSortClass('views')}" onclick="sortBy('views')">Views</th>
+                            <th>Δ</th>
+                            <th class="${getSortClass('favourites')}" onclick="sortBy('favourites')">Favs</th>
+                            <th>Δ</th>
+                            <th class="${getSortClass('comments')}" onclick="sortBy('comments')">Comments</th>
+                            <th>Δ</th>
+                            <th class="${getSortClass('combined')}" onclick="combinedSort()">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || '<tr><td colspan="10">No data</td></tr>'}</tbody>
+                </table>`;
+
+            document.getElementById('stats-table').innerHTML = table;
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadOptions();
+            await loadStats();
+        });
+    </script>
+</body>
+</html>
