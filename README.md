@@ -1,12 +1,14 @@
 # Загрузчик изображений на DeviantArt
 
-[![CI](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Release](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
+> **Language**: [English](README_EN.md)
+
+[![CI](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/ci.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/release.yml?style=for-the-badge&logo=github&label=Release)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader?style=for-the-badge&logo=github)](https://github.com/sni10/deviant_uploader/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-66%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-47%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 
 
 
@@ -362,11 +364,69 @@ python run_stats.py
 | `DA_CLIENT_SECRET` | Да | - | Client secret приложения DeviantArt |
 | `DA_REDIRECT_URI` | Нет | `http://localhost:8080/callback` | URI для OAuth redirect |
 | `DA_SCOPES` | Нет | `browse stash publish` | OAuth scopes |
-| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к базе данных SQLite |
+| `DATABASE_TYPE` | Нет | `sqlite` | Тип базы данных (`sqlite` или `postgresql`) |
+| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к базе данных SQLite (для DATABASE_TYPE=sqlite) |
+| `DATABASE_URL` | Нет | - | URL подключения PostgreSQL (для DATABASE_TYPE=postgresql) |
 | `UPLOAD_DIR` | Нет | `upload` | Директория для загрузки изображений |
 | `DONE_DIR` | Нет | `upload/done` | Директория для загруженных изображений |
 | `LOG_DIR` | Нет | `logs` | Директория для лог-файлов |
 | `LOG_LEVEL` | Нет | `INFO` | Уровень логирования |
+
+## Уровень абстракции базы данных
+
+Приложение поддерживает работу с двумя типами баз данных через единый интерфейс: **SQLite** (по умолчанию) и **PostgreSQL** (через SQLAlchemy ORM). Переключение между типами баз данных выполняется через конфигурацию без изменения кода.
+
+### Архитектура
+
+Уровень абстракции следует **шаблону адаптера на основе протокола**:
+
+- **DBConnection Protocol** - минимальный интерфейс (`execute`, `commit`, `close`), от которого зависят все репозитории
+- **SQLiteAdapter** - адаптер для SQLite с существующей схемой и миграциями
+- **SQLAlchemyAdapter** - адаптер для PostgreSQL через SQLAlchemy ORM
+- **Factory Functions** - `get_connection()` и `get_database_adapter()` автоматически выбирают нужный бэкенд
+
+### Переключение между базами данных
+
+**Для использования SQLite** (по умолчанию):
+```env
+DATABASE_TYPE=sqlite
+DATABASE_PATH=data/deviant.db
+```
+
+**Для использования PostgreSQL**:
+```env
+DATABASE_TYPE=postgresql
+DATABASE_URL=postgresql://username:password@localhost:5432/deviant
+```
+
+Изменение кода не требуется — просто обновите `.env` и перезапустите приложение.
+
+### Использование в коде
+
+Все репозитории работают прозрачно с обоими типами баз данных:
+
+```python
+from src.storage import create_repositories
+
+# Автоматически использует настроенную базу данных
+user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories()
+
+# Использовать репозитории как обычно
+user = user_repo.get_user_by_userid('12345')
+
+# Закрыть по завершении (все репозитории используют одно соединение)
+token_repo.close()
+```
+
+### Преимущества
+
+✅ **Легкое переключение** - изменение одной переменной в `.env`  
+✅ **Обратная совместимость** - SQLite остается по умолчанию  
+✅ **Без изменений кода** - все 5 репозиториев работают с обоими бэкендами  
+✅ **Следование SOLID** - инверсия зависимостей через протокол  
+✅ **Расширяемость** - легко добавить MySQL или другие СУБД  
+
+Подробная техническая документация: `doc/drafts/DATABASE_ABSTRACTION.md`
 
 ## Структура проекта
 
@@ -411,7 +471,10 @@ deviant/
     │   ├── oauth_token_repository.py  # Репозиторий OAuth токенов
      │   ├── gallery_repository.py      # Репозиторий галерей
     │   ├── deviation_repository.py    # Репозиторий девиаций
-    │   └── stats_repository.py        # Репозиторий статистики и снэпшотов
+    │   ├── deviation_stats_repository.py  # Репозиторий текущей статистики девиаций
+    │   ├── stats_snapshot_repository.py   # Репозиторий дневных снэпшотов статистики
+    │   ├── user_stats_snapshot_repository.py  # Репозиторий истории вотчеров пользователя
+    │   └── deviation_metadata_repository.py   # Репозиторий расширенных метаданных девиаций
     ├── service/
     │   ├── __init__.py
     │   ├── auth_service.py     # OAuth2 аутентификация

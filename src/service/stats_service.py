@@ -8,7 +8,10 @@ from typing import Optional
 import requests
 
 from ..storage.deviation_repository import DeviationRepository
-from ..storage.stats_repository import StatsRepository
+from ..storage.deviation_stats_repository import DeviationStatsRepository
+from ..storage.stats_snapshot_repository import StatsSnapshotRepository
+from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
+from ..storage.deviation_metadata_repository import DeviationMetadataRepository
 
 
 class StatsService:
@@ -24,11 +27,17 @@ class StatsService:
 
     def __init__(
         self,
-        stats_repository: StatsRepository,
+        deviation_stats_repository: DeviationStatsRepository,
+        stats_snapshot_repository: StatsSnapshotRepository,
+        user_stats_snapshot_repository: UserStatsSnapshotRepository,
+        deviation_metadata_repository: DeviationMetadataRepository,
         deviation_repository: DeviationRepository,
         logger: Logger,
     ) -> None:
-        self.stats_repository = stats_repository
+        self.deviation_stats_repo = deviation_stats_repository
+        self.stats_snapshot_repo = stats_snapshot_repository
+        self.user_stats_snapshot_repo = user_stats_snapshot_repository
+        self.deviation_metadata_repo = deviation_metadata_repository
         self.deviation_repository = deviation_repository
         self.logger = logger
 
@@ -449,7 +458,7 @@ class StatsService:
 
         try:
             # user_id can be left None, we're keying by username
-            self.stats_repository.save_user_stats_snapshot(
+            self.user_stats_snapshot_repo.save_user_stats_snapshot(
                 user_id=None,
                 username=resolved_username,
                 snapshot_date=snapshot_date,
@@ -464,7 +473,7 @@ class StatsService:
             )
 
         # Fetch the latest snapshot to get watchers_diff calculated by the repository
-        latest_snapshot = self.stats_repository.get_latest_user_stats_snapshot(resolved_username)
+        latest_snapshot = self.user_stats_snapshot_repo.get_latest_user_stats_snapshot(resolved_username)
         if latest_snapshot:
             # Return the complete snapshot including watchers_diff
             return latest_snapshot
@@ -569,7 +578,7 @@ class StatsService:
                 stats.get("comments", 0),
             )
 
-            self.stats_repository.save_deviation_stats(
+            self.deviation_stats_repo.save_deviation_stats(
                 deviationid=deviationid,
                 title=basic.get("title") or meta.get("title") or "Untitled",
                 views=stats.get("views", 0),
@@ -581,7 +590,7 @@ class StatsService:
                 url=basic.get("url"),
             )
 
-            self.stats_repository.save_snapshot(
+            self.stats_snapshot_repo.save_snapshot(
                 deviationid=deviationid,
                 snapshot_date=today,
                 views=stats.get("views", 0),
@@ -611,7 +620,7 @@ class StatsService:
                             exc,
                         )
 
-            self.stats_repository.save_metadata(
+            self.deviation_metadata_repo.save_metadata(
                 deviationid=deviationid,
                 title=meta.get("title") or basic.get("title") or "Untitled",
                 description=meta.get("description"),
@@ -662,7 +671,7 @@ class StatsService:
     def get_stats_with_diff(self) -> list[dict]:
         """Return current stats with deltas vs yesterday."""
 
-        stats = self.stats_repository.get_all_stats_with_previous()
+        stats = self.deviation_stats_repo.get_all_stats_with_previous()
         for row in stats:
             row["views_diff"] = row["views"] - row["yesterday_views"]
             row["favourites_diff"] = row["favourites"] - row["yesterday_favourites"]
