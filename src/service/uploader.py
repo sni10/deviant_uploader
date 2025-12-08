@@ -660,10 +660,17 @@ class UploaderService:
                 self.logger.debug(f"File {normalized_filename} already in database")
             else:
                 # Create new draft deviation with normalized filename
+                # Always store absolute file path to avoid later resolution issues
+                try:
+                    absolute_fp = str(image_file.resolve())
+                except Exception:
+                    # Fallback to string path if resolve() fails for any reason
+                    absolute_fp = str(image_file)
+
                 deviation = Deviation(
                     filename=normalized_filename,
                     title=original_stem,  # Use filename without extension as default title
-                    file_path=str(image_file),
+                    file_path=absolute_fp,
                     status=UploadStatus.DRAFT
                 )
                 

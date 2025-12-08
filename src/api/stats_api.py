@@ -713,54 +713,64 @@ def create_app(config: Config = None) -> Flask:
             if not deviation:
                 return jsonify({'error': 'Deviation not found'}), 404
 
+            # Resolve actual file path robustly
+            def _resolve_candidate_from_upload_dir(fname: str) -> Path | None:
+                """Find a candidate file in upload_dir by filename (case-insensitive extension)."""
+                if not fname:
+                    return None
+                upload_dir = config.upload_dir
+                stem = Path(fname).stem
+                suffix = Path(fname).suffix.lower()
+                # Try lowered suffix first
+                cand = upload_dir / f"{stem}{suffix}"
+                if cand.exists():
+                    return cand
+                # Try common extensions
+                for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+                    cand2 = upload_dir / f"{stem}{ext}"
+                    if cand2.exists():
+                        return cand2
+                return None
+
             # Preferred path from DB
             file_path = Path(deviation.file_path) if getattr(deviation, 'file_path', None) else None
 
-            # If missing or doesn't exist, try to reconstruct from upload_dir and filename
-            if not file_path or not file_path.exists():
+            # If path is missing or invalid OR points to a known-bad base, rebuild from upload_dir
+            # Also handle paths that contain the bad segment anywhere (not only prefix)
+            bad_segment = str(PROJECT_ROOT / 'src' / 'api' / 'upload').lower()
+            needs_rebuild = (
+                file_path is None
+                or not file_path.exists()
+                or str(file_path).lower().startswith(bad_segment)
+                or bad_segment in str(file_path).lower()
+                or (file_path and not file_path.is_absolute())
+            )
+
+            if needs_rebuild:
                 dev_filename = None
-                try:
-                    if getattr(deviation, 'filename', None):
-                        dev_filename = deviation.filename
-                    elif file_path:
-                        dev_filename = file_path.name
-                except Exception:
-                    dev_filename = None
+                if getattr(deviation, 'filename', None):
+                    dev_filename = deviation.filename
+                elif file_path:
+                    dev_filename = file_path.name
 
-                # Use configured upload directory
-                upload_dir = config.upload_dir
+                candidate_path = _resolve_candidate_from_upload_dir(dev_filename)
+                # As a last resort, if we had a bad stored path, try by that name as well
+                if not candidate_path and file_path is not None:
+                    candidate_path = _resolve_candidate_from_upload_dir(file_path.name)
 
-                candidate_path = None
-                if dev_filename:
-                    stem = Path(dev_filename).stem
-                    suffix = Path(dev_filename).suffix.lower()
-
-                    # 1) Try exact stem + lowered suffix
-                    cand = upload_dir / f"{stem}{suffix}"
-                    if cand.exists():
-                        candidate_path = cand
-                    else:
-                        # 2) Try common image suffixes with same stem
-                        for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
-                            cand2 = upload_dir / f"{stem}{ext}"
-                            if cand2.exists():
-                                candidate_path = cand2
-                                break
-
-                # Fallback: keep original path if nothing found
                 if candidate_path and candidate_path.exists():
                     file_path = candidate_path
-                    # Persist the fix back to DB for future requests
+                    # Persist corrected path and filename
                     try:
                         deviation.file_path = str(candidate_path)
-                        # Also normalize filename extension if it differs
-                        if getattr(deviation, 'filename', None):
-                            new_name = candidate_path.name
-                            if deviation.filename != new_name:
-                                deviation.filename = new_name
+                        new_name = candidate_path.name
+                        if getattr(deviation, 'filename', None) and deviation.filename != new_name:
+                            deviation.filename = new_name
                         deviation_repo.update_deviation(deviation)
                     except Exception as update_exc:
-                        g.logger.warning(f"Failed to persist corrected file path for deviation {deviation_id}: {update_exc}")
+                        g.logger.warning(
+                            f"Failed to persist corrected file path for deviation {deviation_id}: {update_exc}"
+                        )
                 else:
                     return jsonify({'error': 'File not found on disk'}), 404
 
