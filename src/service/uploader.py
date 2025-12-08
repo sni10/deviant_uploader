@@ -620,6 +620,41 @@ class UploaderService:
             existing = self.deviation_repository.get_deviation_by_filename(normalized_filename)
             
             if existing:
+                # Existing record found: ensure filename normalization and valid absolute file_path
+                updated = False
+                # Normalize stored filename to use lowercased extension
+                if getattr(existing, 'filename', None) and existing.filename != normalized_filename:
+                    existing.filename = normalized_filename
+                    updated = True
+
+                # Fix file_path if missing or points to non-existent location
+                try:
+                    existing_path = Path(existing.file_path) if getattr(existing, 'file_path', None) else None
+                except Exception:
+                    existing_path = None
+
+                if not existing_path or not existing_path.exists():
+                    # Use the discovered image_file from scan (absolute path)
+                    try:
+                        existing.file_path = str(image_file.resolve())
+                        updated = True
+                        self.logger.info(
+                            f"Corrected file path for {normalized_filename} -> {existing.file_path}"
+                        )
+                    except Exception as fix_exc:
+                        self.logger.warning(
+                            f"Failed to correct file path for {normalized_filename}: {fix_exc}"
+                        )
+
+                if updated:
+                    # Persist corrections
+                    try:
+                        self.deviation_repository.update_deviation(existing)
+                    except Exception as upd_exc:
+                        self.logger.warning(
+                            f"Failed to update deviation record for {normalized_filename}: {upd_exc}"
+                        )
+
                 # Add existing record to list
                 drafts.append(existing)
                 self.logger.debug(f"File {normalized_filename} already in database")
