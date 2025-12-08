@@ -218,3 +218,43 @@ class DeviationMetadata(Base):
     stats_comments = Column(Integer)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class UploadPreset(Base):
+    """Upload preset configuration for batch deviation uploads."""
+    
+    __tablename__ = 'upload_presets'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    description = Column(Text)
+    
+    # Title generation parameters
+    base_title = Column(String, nullable=False)
+    title_increment_start = Column(Integer, default=1)
+    last_used_increment = Column(Integer, default=1)
+    
+    # Stash parameters
+    artist_comments = Column(Text)
+    tags = Column(Text)  # JSON array
+    is_ai_generated = Column(Integer, default=1)
+    noai = Column(Integer, default=0)
+    is_dirty = Column(Integer, default=0)
+    
+    # Publish parameters
+    is_mature = Column(Integer, default=0)
+    mature_level = Column(String)
+    mature_classification = Column(Text)  # JSON array
+    feature = Column(Integer, default=1)
+    allow_comments = Column(Integer, default=1)
+    display_resolution = Column(Integer, default=0)
+    allow_free_download = Column(Integer, default=0)
+    add_watermark = Column(Integer, default=0)
+    
+    # Gallery selection
+    gallery_folderid = Column(String)
+    
+    # Metadata
+    is_default = Column(Integer, default=0, index=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

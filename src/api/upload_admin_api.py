@@ -1,40 +1,18 @@
-"""Flask API for stats dashboard and upload admin interface.
-
-Provides endpoints:
-- GET /api/stats       → current deviation stats with daily diffs
-- POST /api/stats/sync → trigger sync for a gallery folder (body: {"folderid": "...", "username": "optional"})
-- GET /api/admin/*     → upload admin API endpoints
-- GET /upload_admin.html → upload admin interface
-
-Serves static pages:
-- `/` → stats.html (statistics dashboard)
-- `/upload_admin.html` → upload_admin.html (upload interface)
-
-Architecture:
-- Uses Flask application factory pattern (create_app)
-- Per-request database connections via Flask's g object
-- Proper connection cleanup in teardown_appcontext
-"""
-
+"""Flask API for upload admin interface."""
+import json
 from pathlib import Path
-import logging
-from flask import Flask, jsonify, request, send_from_directory, send_file, g
+from flask import Flask, request, jsonify, send_file, send_from_directory
 
-from ..config import get_config, Config
+from ..config import get_config
 from ..log.logger import setup_logger
-from ..storage import get_connection
-from ..storage.user_repository import UserRepository
-from ..storage.oauth_token_repository import OAuthTokenRepository
-from ..storage.gallery_repository import GalleryRepository
-from ..storage.deviation_repository import DeviationRepository
-from ..storage.deviation_stats_repository import DeviationStatsRepository
-from ..storage.stats_snapshot_repository import StatsSnapshotRepository
-from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
-from ..storage.deviation_metadata_repository import DeviationMetadataRepository
-from ..storage.preset_repository import PresetRepository
 from ..service.auth_service import AuthService
-from ..service.stats_service import StatsService
 from ..service.uploader import UploaderService
+from ..storage import (
+    get_connection,
+    DeviationRepository,
+    GalleryRepository
+)
+from ..storage.preset_repository import PresetRepository
 from ..domain.models import UploadPreset
 
 
@@ -43,89 +21,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 STATIC_DIR = PROJECT_ROOT / "static"
 
 
-def get_repositories():
+def create_upload_admin_app():
     """
-    Get or create repositories for the current request.
-    
-    Uses Flask's g object to store per-request database connection and repositories.
-    Creates them lazily on first access within a request.
+    Create and configure Flask application for upload admin interface.
     
     Returns:
-        Tuple of (user_repo, token_repo, gallery_repo, deviation_repo, 
-                  deviation_stats_repo, stats_snapshot_repo, 
-                  user_stats_snapshot_repo, deviation_metadata_repo)
+        Configured Flask app
     """
-    if 'repositories' not in g:
-        # Create new connection for this request
+    app = Flask(__name__, static_folder=str(STATIC_DIR))
+    
+    config = get_config()
+    logger = setup_logger()
+    
+    # Initialize repositories and services
+    def get_services():
+        """Get service instances (called per request)."""
         conn = get_connection()
-        g.connection = conn
-        
-        # Create repositories with this connection
-        user_repo = UserRepository(conn)
-        token_repo = OAuthTokenRepository(conn)
-        gallery_repo = GalleryRepository(conn)
         deviation_repo = DeviationRepository(conn)
-        deviation_stats_repo = DeviationStatsRepository(conn)
-        stats_snapshot_repo = StatsSnapshotRepository(conn)
-        user_stats_snapshot_repo = UserStatsSnapshotRepository(conn)
-        deviation_metadata_repo = DeviationMetadataRepository(conn)
-        
-        g.repositories = (
-            user_repo, token_repo, gallery_repo, deviation_repo,
-            deviation_stats_repo, stats_snapshot_repo, 
-            user_stats_snapshot_repo, deviation_metadata_repo
-        )
-    
-    return g.repositories
-
-
-def get_services():
-    """
-    Get or create services for the current request.
-    
-    Services are created lazily and tied to the current request's repositories.
-    
-    Returns:
-        Tuple of (auth_service, stats_service)
-    """
-    if 'services' not in g:
-        (user_repo, token_repo, gallery_repo, deviation_repo,
-         deviation_stats_repo, stats_snapshot_repo, 
-         user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
-        logger = g.logger
-        
-        auth_service = AuthService(token_repo, logger)
-        stats_service = StatsService(
-            deviation_stats_repo,
-            stats_snapshot_repo,
-            user_stats_snapshot_repo,
-            deviation_metadata_repo,
-            deviation_repo,
-            logger
-        )
-        
-        g.services = (auth_service, stats_service)
-    
-    return g.services
-
-
-def get_upload_services():
-    """
-    Get or create upload-related services for the current request.
-    
-    Services are created lazily and tied to the current request's repositories.
-    
-    Returns:
-        Tuple of (uploader_service, preset_repo, deviation_repo)
-    """
-    if 'upload_services' not in g:
-        (user_repo, token_repo, gallery_repo, deviation_repo,
-         deviation_stats_repo, stats_snapshot_repo, 
-         user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
-        logger = g.logger
-        
-        preset_repo = PresetRepository(g.connection)
-        auth_service = AuthService(token_repo, logger)
+        gallery_repo = GalleryRepository(conn)
+        preset_repo = PresetRepository(conn)
+        auth_service = AuthService(conn)
         uploader_service = UploaderService(
             deviation_repo,
             gallery_repo,
@@ -133,178 +48,21 @@ def get_upload_services():
             preset_repo,
             logger
         )
-        
-        g.upload_services = (uploader_service, preset_repo, deviation_repo)
+        return uploader_service, preset_repo, deviation_repo
     
-    return g.upload_services
-
-
-def create_app(config: Config = None) -> Flask:
-    """
-    Flask application factory.
-    
-    Creates and configures the Flask application with proper dependency injection
-    and per-request resource management.
-    
-    Args:
-        config: Optional Config instance. If None, uses get_config()
-        
-    Returns:
-        Configured Flask application instance
-        
-    Example:
-        >>> app = create_app()
-        >>> app.run(host="0.0.0.0", port=5000)
-    """
-    # Initialize config
-    if config is None:
-        config = get_config()
-    
-    # Setup logger for this app instance
-    log_level = getattr(logging, config.log_level.upper(), logging.INFO)
-    logger = setup_logger(name="stats_api", log_dir=config.log_dir, level=log_level)
-    
-    # Create Flask app
-    app = Flask(__name__, static_folder=str(STATIC_DIR))
-    
-    # Store config and logger in app context for access in requests
-    app.config['APP_CONFIG'] = config
-    app.config['APP_LOGGER'] = logger
-    
-    @app.before_request
-    def before_request():
-        """Set up request context with logger."""
-        g.logger = app.config['APP_LOGGER']
-    
-    @app.teardown_appcontext
-    def teardown_db(exception=None):
-        """Close database connection at the end of request."""
-        conn = g.pop('connection', None)
-        if conn is not None:
-            conn.close()
-            if exception:
-                g.logger.warning(f"Request ended with exception: {exception}")
-    
-    @app.route("/")
+    @app.route('/')
     def index():
-        """Serve dashboard page."""
-        return send_from_directory(STATIC_DIR, "stats.html")
-
-    @app.route("/api/stats", methods=["GET"])
-    def get_stats():
-        """Return current stats with diffs."""
-        try:
-            auth_service, stats_service = get_services()
-            data = stats_service.get_stats_with_diff()
-            return jsonify({"success": True, "data": data})
-        except Exception as exc:  # noqa: BLE001 (surface error to caller)
-            g.logger.error("Failed to fetch stats", exc_info=exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
-
-    @app.route("/api/stats/sync", methods=["POST"])
-    def sync_stats():
-        """Trigger sync from DeviantArt for a given gallery folder."""
-        try:
-            payload = request.get_json(silent=True) or {}
-            folderid = (payload.get("folderid") or "").strip()
-            username = payload.get("username")
-            include_deviations = bool(payload.get("include_deviations"))
-
-            if not folderid:
-                return jsonify({"success": False, "error": "folderid is required"}), 400
-
-            auth_service, stats_service = get_services()
-
-            # Ensure authentication (refreshes if needed; may prompt user if absent)
-            if not auth_service.ensure_authenticated():
-                return jsonify({"success": False, "error": "Not authenticated"}), 401
-
-            access_token = auth_service.get_valid_token()
-            if not access_token:
-                return jsonify({"success": False, "error": "Failed to obtain access token"}), 401
-
-            result = stats_service.sync_gallery(
-                access_token,
-                folderid,
-                username=username,
-                include_deviations=include_deviations,
-            )
-            return jsonify({"success": True, "data": result})
-        except Exception as exc:  # noqa: BLE001 (surface error to caller)
-            g.logger.error("Failed to sync stats", exc_info=exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
-
-    @app.route("/api/options", methods=["GET"])
-    def get_options():
-        """Return user and gallery options from the database."""
-        try:
-            (user_repo, token_repo, gallery_repo, deviation_repo,
-             deviation_stats_repo, stats_snapshot_repo, 
-             user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
-            users = user_repo.get_all_users()
-            galleries = gallery_repo.get_all_galleries()
-
-            return jsonify(
-                {
-                    "success": True,
-                    "data": {
-                        "users": [
-                            {
-                                "id": user.user_db_id,
-                                "username": user.username,
-                                "userid": user.userid,
-                            }
-                            for user in users
-                        ],
-                        "galleries": [
-                            {
-                                "id": gallery.gallery_db_id,
-                                "folderid": gallery.folderid,
-                                "name": gallery.name,
-                                "size": gallery.size,
-                                "parent": gallery.parent,
-                            }
-                            for gallery in galleries
-                        ],
-                    }
-                }
-            )
-        except Exception as exc:  # noqa: BLE001
-            g.logger.error("Failed to fetch options", exc_info=exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
-
-    @app.route("/api/user_stats/latest", methods=["GET"])
-    def get_latest_user_stats():
-        """Return the latest user stats snapshot for a given username."""
-        try:
-            username = (request.args.get("username") or "").strip()
-            if not username:
-                return jsonify({"success": False, "error": "username is required"}), 400
-
-            (user_repo, token_repo, gallery_repo, deviation_repo,
-             deviation_stats_repo, stats_snapshot_repo, 
-             user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
-            snapshot = user_stats_snapshot_repo.get_latest_user_stats_snapshot(username)
-            return jsonify({"success": True, "data": snapshot})
-        except Exception as exc:  # noqa: BLE001
-            g.logger.error("Failed to fetch latest user stats", exc_info=exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
-
-    @app.route("/static/<path:filename>")
-    def serve_static(filename: str):
-        """Serve other static assets if needed."""
-        return send_from_directory(STATIC_DIR, filename)
-
-    # ========== UPLOAD ADMIN ROUTES ==========
-    
-    @app.route('/upload_admin.html')
-    def upload_admin_html():
-        """Serve upload admin HTML page."""
+        """Redirect to admin page."""
         return send_from_directory(STATIC_DIR, "upload_admin.html")
     
     @app.route('/admin/upload')
     def upload_admin_page():
-        """Serve upload admin HTML page (alternative URL)."""
+        """Serve HTML admin page."""
+        return send_from_directory(STATIC_DIR, "upload_admin.html")
+    
+    @app.route('/upload_admin.html')
+    def upload_admin_html():
+        """Serve HTML admin page (alternative URL for convenience)."""
         return send_from_directory(STATIC_DIR, "upload_admin.html")
     
     @app.route('/api/admin/scan', methods=['POST'])
@@ -316,7 +74,7 @@ def create_app(config: Config = None) -> Flask:
             JSON list of draft deviations with metadata
         """
         try:
-            uploader_service, _, _ = get_upload_services()
+            uploader_service, _, _ = get_services()
             drafts = uploader_service.scan_and_create_drafts()
             
             # Convert to JSON-serializable format
@@ -339,7 +97,7 @@ def create_app(config: Config = None) -> Flask:
                 'count': len(result)
             })
         except Exception as e:
-            g.logger.error(f"Scan failed: {e}", exc_info=True)
+            logger.error(f"Scan failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/drafts', methods=['GET'])
@@ -351,7 +109,7 @@ def create_app(config: Config = None) -> Flask:
             JSON list of deviations
         """
         try:
-            _, _, deviation_repo = get_upload_services()
+            _, _, deviation_repo = get_services()
             
             # Get all deviations (could filter by status if needed)
             all_deviations = deviation_repo.get_all_deviations()
@@ -379,7 +137,7 @@ def create_app(config: Config = None) -> Flask:
                 'count': len(result)
             })
         except Exception as e:
-            g.logger.error(f"Get drafts failed: {e}", exc_info=True)
+            logger.error(f"Get drafts failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/presets', methods=['GET'])
@@ -391,7 +149,7 @@ def create_app(config: Config = None) -> Flask:
             JSON list of presets
         """
         try:
-            _, preset_repo, _ = get_upload_services()
+            _, preset_repo, _ = get_services()
             presets = preset_repo.get_all_presets()
             
             # Convert to JSON-serializable format
@@ -416,7 +174,7 @@ def create_app(config: Config = None) -> Flask:
                 'count': len(result)
             })
         except Exception as e:
-            g.logger.error(f"Get presets failed: {e}", exc_info=True)
+            logger.error(f"Get presets failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/presets', methods=['POST'])
@@ -435,7 +193,7 @@ def create_app(config: Config = None) -> Flask:
             if not data.get('name') or not data.get('base_title'):
                 return jsonify({'success': False, 'error': 'Name and base_title are required'}), 400
             
-            _, preset_repo, _ = get_upload_services()
+            _, preset_repo, _ = get_services()
             
             # Create UploadPreset object
             preset = UploadPreset(
@@ -469,7 +227,7 @@ def create_app(config: Config = None) -> Flask:
                 'message': 'Preset saved successfully'
             })
         except Exception as e:
-            g.logger.error(f"Save preset failed: {e}", exc_info=True)
+            logger.error(f"Save preset failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/apply-preset', methods=['POST'])
@@ -490,7 +248,7 @@ def create_app(config: Config = None) -> Flask:
             if not preset_id or not deviation_ids:
                 return jsonify({'success': False, 'error': 'preset_id and deviation_ids required'}), 400
             
-            uploader_service, preset_repo, deviation_repo = get_upload_services()
+            uploader_service, preset_repo, deviation_repo = get_services()
             
             # Get preset
             preset = preset_repo.get_preset_by_id(preset_id)
@@ -518,7 +276,7 @@ def create_app(config: Config = None) -> Flask:
                 'count': len(applied)
             })
         except Exception as e:
-            g.logger.error(f"Apply preset failed: {e}", exc_info=True)
+            logger.error(f"Apply preset failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/stash', methods=['POST'])
@@ -539,7 +297,7 @@ def create_app(config: Config = None) -> Flask:
             if not deviation_ids or not preset_id:
                 return jsonify({'success': False, 'error': 'deviation_ids and preset_id required'}), 400
             
-            uploader_service, preset_repo, _ = get_upload_services()
+            uploader_service, preset_repo, _ = get_services()
             
             # Get preset
             preset = preset_repo.get_preset_by_id(preset_id)
@@ -554,7 +312,7 @@ def create_app(config: Config = None) -> Flask:
                 'results': results
             })
         except Exception as e:
-            g.logger.error(f"Stash failed: {e}", exc_info=True)
+            logger.error(f"Stash failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/publish', methods=['POST'])
@@ -574,7 +332,7 @@ def create_app(config: Config = None) -> Flask:
             if not deviation_ids:
                 return jsonify({'success': False, 'error': 'deviation_ids required'}), 400
             
-            uploader_service, _, _ = get_upload_services()
+            uploader_service, _, _ = get_services()
             
             # Perform batch publish
             results = uploader_service.batch_publish(deviation_ids)
@@ -584,7 +342,7 @@ def create_app(config: Config = None) -> Flask:
                 'results': results
             })
         except Exception as e:
-            g.logger.error(f"Publish failed: {e}", exc_info=True)
+            logger.error(f"Publish failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/delete', methods=['POST'])
@@ -604,7 +362,7 @@ def create_app(config: Config = None) -> Flask:
             if not deviation_ids:
                 return jsonify({'success': False, 'error': 'deviation_ids required'}), 400
             
-            uploader_service, _, _ = get_upload_services()
+            uploader_service, _, _ = get_services()
             
             deleted = []
             failed = []
@@ -622,7 +380,7 @@ def create_app(config: Config = None) -> Flask:
                 'count': len(deleted)
             })
         except Exception as e:
-            g.logger.error(f"Delete failed: {e}", exc_info=True)
+            logger.error(f"Delete failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/admin/thumbnail/<int:deviation_id>')
@@ -637,7 +395,7 @@ def create_app(config: Config = None) -> Flask:
             Image file or error
         """
         try:
-            _, _, deviation_repo = get_upload_services()
+            _, _, deviation_repo = get_services()
             deviation = deviation_repo.get_deviation_by_id(deviation_id)
             
             if not deviation or not deviation.file_path:
@@ -654,20 +412,12 @@ def create_app(config: Config = None) -> Flask:
                 as_attachment=False
             )
         except Exception as e:
-            g.logger.error(f"Get thumbnail failed: {e}", exc_info=True)
+            logger.error(f"Get thumbnail failed: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     
     return app
 
 
-def get_app() -> Flask:
-    """
-    Expose app for external runners (e.g., gunicorn).
-    
-    Returns:
-        Flask application instance created via factory
-    """
-    return create_app()
-
-
-__all__ = ["create_app", "get_app"]
+if __name__ == '__main__':
+    app = create_upload_admin_app()
+    app.run(debug=True, host='0.0.0.0', port=5001)

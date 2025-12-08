@@ -8,8 +8,9 @@ from typing import Optional
 import requests
 
 from ..config import get_config
-from ..domain.models import Deviation, UploadStatus
+from ..domain.models import Deviation, UploadStatus, UploadPreset
 from ..storage import DeviationRepository, GalleryRepository
+from ..storage.preset_repository import PresetRepository
 from .auth_service import AuthService
 
 
@@ -29,6 +30,7 @@ class UploaderService:
         deviation_repository: DeviationRepository,
         gallery_repository: GalleryRepository,
         auth_service: AuthService,
+        preset_repository: Optional[PresetRepository] = None,
         logger: Optional[logging.Logger] = None
     ):
         """
@@ -38,12 +40,14 @@ class UploaderService:
             deviation_repository: Repository for deviation persistence
             gallery_repository: Repository for gallery lookups
             auth_service: Authentication service
+            preset_repository: Repository for preset management (optional)
             logger: Logger instance
         """
         self.config = get_config()
         self.deviation_repository = deviation_repository
         self.gallery_repository = gallery_repository
         self.auth_service = auth_service
+        self.preset_repository = preset_repository
         self.logger = logger or logging.getLogger(__name__)
     
     def scan_upload_folder(self) -> list[Path]:
@@ -577,3 +581,293 @@ class UploaderService:
         self.deviation_repository.update_deviation(deviation)
         
         return success
+    
+    # ========== Admin Interface Methods ==========
+    
+    def scan_and_create_drafts(self) -> list[Deviation]:
+        """
+        Scan upload folder and create draft deviation records in database.
+        
+        Checks for existing records to avoid duplicates. Only creates drafts
+        for new files not already in database.
+        
+        Returns:
+            List of all draft deviations (new + existing)
+        """
+        self.logger.info("Scanning upload folder for draft creation")
+        
+        # Scan for images
+        image_files = self.scan_upload_folder()
+        
+        drafts = []
+        new_count = 0
+        
+        for image_file in image_files:
+            # Check if already in database
+            existing = self.deviation_repository.get_deviation_by_filename(image_file.name)
+            
+            if existing:
+                # Add existing record to list
+                drafts.append(existing)
+                self.logger.debug(f"File {image_file.name} already in database")
+            else:
+                # Create new draft deviation
+                deviation = Deviation(
+                    filename=image_file.name,
+                    title=image_file.stem,  # Use filename without extension as default title
+                    file_path=str(image_file),
+                    status=UploadStatus.DRAFT
+                )
+                
+                # Save to database
+                deviation_id = self.deviation_repository.save_deviation(deviation)
+                deviation.deviation_id = deviation_id
+                drafts.append(deviation)
+                new_count += 1
+                self.logger.info(f"Created draft for {image_file.name}")
+        
+        self.logger.info(f"Scan complete: {new_count} new drafts, {len(drafts) - new_count} existing")
+        return drafts
+    
+    def apply_preset_to_deviation(
+        self, 
+        deviation: Deviation, 
+        preset: UploadPreset,
+        increment: int
+    ) -> Deviation:
+        """
+        Apply preset configuration to deviation with incremental title.
+        
+        Args:
+            deviation: Deviation to update
+            preset: Preset configuration to apply
+            increment: Increment number for title
+            
+        Returns:
+            Updated deviation object
+        """
+        # Generate title with increment
+        deviation.title = f"{preset.base_title} {increment}"
+        
+        # Apply stash parameters
+        deviation.artist_comments = preset.artist_comments
+        deviation.tags = preset.tags.copy() if preset.tags else []
+        deviation.is_ai_generated = preset.is_ai_generated
+        deviation.noai = preset.noai
+        deviation.is_dirty = preset.is_dirty
+        
+        # Apply publish parameters
+        deviation.is_mature = preset.is_mature
+        deviation.mature_level = preset.mature_level
+        deviation.mature_classification = preset.mature_classification.copy() if preset.mature_classification else []
+        deviation.feature = preset.feature
+        deviation.allow_comments = preset.allow_comments
+        deviation.display_resolution = preset.display_resolution
+        deviation.allow_free_download = preset.allow_free_download
+        deviation.add_watermark = preset.add_watermark
+        
+        # Apply gallery selection (if gallery_folderid provided, look up internal ID)
+        if preset.gallery_folderid:
+            gallery = self.gallery_repository.get_gallery_by_folderid(preset.gallery_folderid)
+            if gallery:
+                deviation.gallery_id = gallery.gallery_db_id
+            else:
+                self.logger.warning(f"Gallery {preset.gallery_folderid} not found")
+        
+        self.logger.info(f"Applied preset '{preset.name}' to {deviation.filename} with title '{deviation.title}'")
+        return deviation
+    
+    def batch_stash(
+        self, 
+        deviation_ids: list[int],
+        preset: UploadPreset
+    ) -> dict:
+        """
+        Stash multiple deviations in batch with rate limiting.
+        
+        Args:
+            deviation_ids: List of deviation database IDs
+            preset: Preset to apply to deviations
+            
+        Returns:
+            Dictionary with success/failed lists and details
+        """
+        self.logger.info(f"Starting batch stash for {len(deviation_ids)} deviations")
+        
+        results = {
+            "success": [],
+            "failed": []
+        }
+        
+        # Get access token
+        access_token = self.auth_service.get_valid_access_token()
+        if not access_token:
+            self.logger.error("Failed to get valid access token")
+            for dev_id in deviation_ids:
+                results["failed"].append({"id": dev_id, "error": "Authentication failed"})
+            return results
+        
+        # Process each deviation
+        for idx, dev_id in enumerate(deviation_ids, 1):
+            try:
+                deviation = self.deviation_repository.get_deviation_by_id(dev_id)
+                if not deviation:
+                    self.logger.warning(f"Deviation {dev_id} not found in database")
+                    results["failed"].append({"id": dev_id, "error": "Not found in database"})
+                    continue
+                
+                # Get next increment value and apply preset
+                if self.preset_repository:
+                    increment = self.preset_repository.increment_preset_counter(preset.preset_id)
+                else:
+                    increment = preset.last_used_increment
+                
+                self.apply_preset_to_deviation(deviation, preset, increment)
+                
+                # Update status to STASHING
+                deviation.status = UploadStatus.STASHING
+                self.deviation_repository.update_deviation(deviation)
+                
+                # Perform stash upload
+                self.logger.info(f"[{idx}/{len(deviation_ids)}] Stashing {deviation.filename}")
+                itemid = self.upload_to_stash(deviation, access_token)
+                
+                if itemid:
+                    deviation.itemid = itemid
+                    deviation.status = UploadStatus.STASHED
+                    self.deviation_repository.update_deviation(deviation)
+                    results["success"].append(dev_id)
+                    self.logger.info(f"Successfully stashed {deviation.filename} (itemid: {itemid})")
+                else:
+                    deviation.status = UploadStatus.FAILED
+                    deviation.error = "Stash upload failed"
+                    self.deviation_repository.update_deviation(deviation)
+                    results["failed"].append({"id": dev_id, "error": "Stash upload failed"})
+                    self.logger.error(f"Failed to stash {deviation.filename}")
+                
+                # Rate limiting: 2 second delay between uploads
+                if idx < len(deviation_ids):
+                    import time
+                    time.sleep(2)
+                    
+            except Exception as e:
+                self.logger.error(f"Exception during stash of deviation {dev_id}: {e}", exc_info=True)
+                results["failed"].append({"id": dev_id, "error": str(e)})
+        
+        self.logger.info(f"Batch stash complete: {len(results['success'])} success, {len(results['failed'])} failed")
+        return results
+    
+    def batch_publish(self, deviation_ids: list[int]) -> dict:
+        """
+        Publish multiple stashed deviations in batch.
+        
+        Args:
+            deviation_ids: List of deviation database IDs (must have itemid)
+            
+        Returns:
+            Dictionary with success/failed lists and details
+        """
+        self.logger.info(f"Starting batch publish for {len(deviation_ids)} deviations")
+        
+        results = {
+            "success": [],
+            "failed": []
+        }
+        
+        # Get access token
+        access_token = self.auth_service.get_valid_access_token()
+        if not access_token:
+            self.logger.error("Failed to get valid access token")
+            for dev_id in deviation_ids:
+                results["failed"].append({"id": dev_id, "error": "Authentication failed"})
+            return results
+        
+        # Process each deviation
+        for idx, dev_id in enumerate(deviation_ids, 1):
+            try:
+                deviation = self.deviation_repository.get_deviation_by_id(dev_id)
+                if not deviation:
+                    self.logger.warning(f"Deviation {dev_id} not found in database")
+                    results["failed"].append({"id": dev_id, "error": "Not found in database"})
+                    continue
+                
+                if not deviation.itemid:
+                    self.logger.warning(f"Deviation {dev_id} has no itemid, cannot publish")
+                    results["failed"].append({"id": dev_id, "error": "No itemid (not stashed)"})
+                    continue
+                
+                # Update status to PUBLISHING
+                deviation.status = UploadStatus.PUBLISHING
+                self.deviation_repository.update_deviation(deviation)
+                
+                # Perform publish
+                self.logger.info(f"[{idx}/{len(deviation_ids)}] Publishing {deviation.filename}")
+                success = self._publish_deviation(deviation, access_token)
+                
+                if success:
+                    deviation.status = UploadStatus.PUBLISHED
+                    self.deviation_repository.update_deviation(deviation)
+                    results["success"].append(dev_id)
+                    self.logger.info(f"Successfully published {deviation.filename}")
+                    
+                    # Delete file after successful publish
+                    if deviation.file_path:
+                        try:
+                            file_path = Path(deviation.file_path)
+                            if file_path.exists():
+                                file_path.unlink()
+                                self.logger.info(f"Deleted file {deviation.file_path}")
+                        except Exception as e:
+                            self.logger.warning(f"Failed to delete file {deviation.file_path}: {e}")
+                else:
+                    deviation.status = UploadStatus.FAILED
+                    deviation.error = "Publish failed"
+                    self.deviation_repository.update_deviation(deviation)
+                    results["failed"].append({"id": dev_id, "error": "Publish failed"})
+                    self.logger.error(f"Failed to publish {deviation.filename}")
+                
+                # Rate limiting: 2 second delay between publishes
+                if idx < len(deviation_ids):
+                    import time
+                    time.sleep(2)
+                    
+            except Exception as e:
+                self.logger.error(f"Exception during publish of deviation {dev_id}: {e}", exc_info=True)
+                results["failed"].append({"id": dev_id, "error": str(e)})
+        
+        self.logger.info(f"Batch publish complete: {len(results['success'])} success, {len(results['failed'])} failed")
+        return results
+    
+    def delete_deviation_and_file(self, deviation_id: int) -> bool:
+        """
+        Delete deviation record from database and its associated file.
+        
+        Args:
+            deviation_id: Database ID of deviation to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            deviation = self.deviation_repository.get_deviation_by_id(deviation_id)
+            if not deviation:
+                self.logger.warning(f"Deviation {deviation_id} not found")
+                return False
+            
+            # Delete file if it exists
+            if deviation.file_path:
+                file_path = Path(deviation.file_path)
+                if file_path.exists():
+                    file_path.unlink()
+                    self.logger.info(f"Deleted file {deviation.file_path}")
+            
+            # Delete database record
+            success = self.deviation_repository.delete_deviation(deviation_id)
+            if success:
+                self.logger.info(f"Deleted deviation {deviation_id} ({deviation.filename})")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"Failed to delete deviation {deviation_id}: {e}", exc_info=True)
+            return False

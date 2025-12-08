@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeviantArt Upload Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        select {
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        .status-message {
+            flex: 1;
+            text-align: right;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .table-container {
+            padding: 30px;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .thumbnail {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 5px;
+            border: 2px solid #ddd;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-draft {
+            background: #e9ecef;
+            color: #495057;
+        }
+
+        .status-stashing {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-stashed {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status-publishing {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .status-published {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .loading {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            z-index: 1000;
+            text-align: center;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+        }
+
+        .overlay.active {
+            display: block;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state h2 {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+
+        .empty-state p {
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 DeviantArt Upload Admin</h1>
+            <p>Two-Stage Upload Manager: Draft → Stash → Publish</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" onclick="scanFiles()">📂 Scan Files</button>
+            
+            <select id="presetSelect" onchange="onPresetChange()">
+                <option value="">Select Preset...</option>
+            </select>
+            
+            <button class="btn btn-info" onclick="applyPreset()" id="applyPresetBtn" disabled>✨ Apply Preset</button>
+            <button class="btn btn-success" onclick="stashSelected()" id="stashBtn" disabled>📤 Stash Selected</button>
+            <button class="btn btn-warning" onclick="publishSelected()" id="publishBtn" disabled>🚀 Publish Selected</button>
+            <button class="btn btn-danger" onclick="deleteSelected()" id="deleteBtn" disabled>🗑️ Delete Selected</button>
+            
+            <div class="status-message" id="statusMessage"></div>
+        </div>
+
+        <div class="table-container">
+            <table id="deviationsTable">
+                <thead>
+                    <tr>
+                        <th>
+                            <input type="checkbox" class="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                        </th>
+                        <th>Preview</th>
+                        <th>Filename</th>
+                        <th>Title</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr>
+                        <td colspan="6" class="empty-state">
+                            <h2>No files loaded</h2>
+                            <p>Click "Scan Files" to load images from the upload folder</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay"></div>
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p id="loadingText">Processing...</p>
+    </div>
+
+    <script>
+        let deviations = [];
+        let presets = [];
+        let selectedPresetId = null;
+
+        // Initialize
+        window.onload = function() {
+            loadPresets();
+            loadDrafts();
+        };
+
+        function showLoading(text = 'Processing...') {
+            document.getElementById('loadingText').textContent = text;
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('overlay').classList.add('active');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.remove('active');
+            document.getElementById('overlay').classList.remove('active');
+        }
+
+        function setStatus(message, type = 'info') {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.style.color = type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#666';
+        }
+
+        async function loadPresets() {
+            try {
+                const response = await fetch('/api/admin/presets');
+                const data = await response.json();
+                
+                if (data.success) {
+                    presets = data.presets;
+                    const select = document.getElementById('presetSelect');
+                    
+                    // Clear existing options except first
+                    select.innerHTML = '<option value="">Select Preset...</option>';
+                    
+                    // Add presets
+                    presets.forEach(preset => {
+                        const option = document.createElement('option');
+                        option.value = preset.id;
+                        option.textContent = preset.name;
+                        if (preset.is_default) {
+                            option.textContent += ' (Default)';
+                        }
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load presets:', error);
+                setStatus('Failed to load presets', 'error');
+            }
+        }
+
+        async function loadDrafts() {
+            try {
+                const response = await fetch('/api/admin/drafts');
+                const data = await response.json();
+                
+                if (data.success) {
+                    deviations = data.deviations;
+                    renderTable();
+                    setStatus(`Loaded ${deviations.length} deviations`);
+                }
+            } catch (error) {
+                console.error('Failed to load drafts:', error);
+                setStatus('Failed to load drafts', 'error');
+            }
+        }
+
+        async function scanFiles() {
+            showLoading('Scanning upload folder...');
+            
+            try {
+                const response = await fetch('/api/admin/scan', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    deviations = data.drafts;
+                    renderTable();
+                    setStatus(`Scanned: ${data.count} files`, 'success');
+                } else {
+                    setStatus('Scan failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Scan failed:', error);
+                setStatus('Scan failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            
+            if (deviations.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="empty-state">
+                            <h2>No files found</h2>
+                            <p>Upload folder is empty or all files have been processed</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            tbody.innerHTML = deviations.map(dev => `
+                <tr>
+                    <td>
+                        <input type="checkbox" class="checkbox deviation-checkbox" data-id="${dev.id}" onchange="updateButtonStates()">
+                    </td>
+                    <td>
+                        <img src="/api/admin/thumbnail/${dev.id}" alt="${dev.filename}" class="thumbnail" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'">
+                    </td>
+                    <td>${dev.filename}</td>
+                    <td>${dev.title || '-'}</td>
+                    <td><span class="status-badge status-${dev.status}">${dev.status}</span></td>
+                    <td>
+                        <button class="btn btn-danger" style="padding: 5px 10px; font-size: 12px;" onclick="deleteSingle(${dev.id})">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            updateButtonStates();
+        }
+
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.deviation-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateButtonStates();
+        }
+
+        function updateButtonStates() {
+            const selected = getSelectedIds();
+            const hasSelection = selected.length > 0;
+            
+            document.getElementById('applyPresetBtn').disabled = !hasSelection || !selectedPresetId;
+            document.getElementById('stashBtn').disabled = !hasSelection || !selectedPresetId;
+            document.getElementById('publishBtn').disabled = !hasSelection;
+            document.getElementById('deleteBtn').disabled = !hasSelection;
+        }
+
+        function onPresetChange() {
+            const select = document.getElementById('presetSelect');
+            selectedPresetId = select.value ? parseInt(select.value) : null;
+            updateButtonStates();
+        }
+
+        function getSelectedIds() {
+            const checkboxes = document.querySelectorAll('.deviation-checkbox:checked');
+            return Array.from(checkboxes).map(cb => parseInt(cb.dataset.id));
+        }
+
+        async function applyPreset() {
+            const selectedIds = getSelectedIds();
+            if (selectedIds.length === 0 || !selectedPresetId) return;
+            
+            showLoading(`Applying preset to ${selectedIds.length} files...`);
+            
+            try {
+                const response = await fetch('/api/admin/apply-preset', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        preset_id: selectedPresetId,
+                        deviation_ids: selectedIds
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    await loadDrafts();
+                    setStatus(`Applied preset to ${data.count} files`, 'success');
+                } else {
+                    setStatus('Apply failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Apply failed:', error);
+                setStatus('Apply failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function stashSelected() {
+            const selectedIds = getSelectedIds();
+            if (selectedIds.length === 0 || !selectedPresetId) return;
+            
+            showLoading(`Stashing ${selectedIds.length} files... (This may take a while)`);
+            
+            try {
+                const response = await fetch('/api/admin/stash', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        deviation_ids: selectedIds,
+                        preset_id: selectedPresetId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const results = data.results;
+                    const successCount = results.success.length;
+                    const failCount = results.failed.length;
+                    
+                    await loadDrafts();
+                    setStatus(`Stashed: ${successCount} success, ${failCount} failed`, successCount > 0 ? 'success' : 'error');
+                } else {
+                    setStatus('Stash failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Stash failed:', error);
+                setStatus('Stash failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function publishSelected() {
+            const selectedIds = getSelectedIds();
+            if (selectedIds.length === 0) return;
+            
+            if (!confirm(`Publish ${selectedIds.length} deviations? Files will be deleted after successful publish.`)) {
+                return;
+            }
+            
+            showLoading(`Publishing ${selectedIds.length} files... (This may take a while)`);
+            
+            try {
+                const response = await fetch('/api/admin/publish', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        deviation_ids: selectedIds
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const results = data.results;
+                    const successCount = results.success.length;
+                    const failCount = results.failed.length;
+                    
+                    await loadDrafts();
+                    setStatus(`Published: ${successCount} success, ${failCount} failed`, successCount > 0 ? 'success' : 'error');
+                } else {
+                    setStatus('Publish failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Publish failed:', error);
+                setStatus('Publish failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function deleteSelected() {
+            const selectedIds = getSelectedIds();
+            if (selectedIds.length === 0) return;
+            
+            if (!confirm(`Delete ${selectedIds.length} deviations and their files? This cannot be undone.`)) {
+                return;
+            }
+            
+            showLoading(`Deleting ${selectedIds.length} files...`);
+            
+            try {
+                const response = await fetch('/api/admin/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        deviation_ids: selectedIds
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    await loadDrafts();
+                    setStatus(`Deleted ${data.count} files`, 'success');
+                } else {
+                    setStatus('Delete failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Delete failed:', error);
+                setStatus('Delete failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function deleteSingle(id) {
+            if (!confirm('Delete this deviation and file? This cannot be undone.')) {
+                return;
+            }
+            
+            showLoading('Deleting...');
+            
+            try {
+                const response = await fetch('/api/admin/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        deviation_ids: [id]
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    await loadDrafts();
+                    setStatus('File deleted', 'success');
+                } else {
+                    setStatus('Delete failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Delete failed:', error);
+                setStatus('Delete failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+    </script>
+</body>
+</html>
