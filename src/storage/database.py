@@ -317,7 +317,10 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
 
 def init_database(db_path: str | Path) -> sqlite3.Connection:
     """
-    Initialize database with schema.
+    Initialize database with schema (legacy function for backward compatibility).
+    
+    This function is kept for backward compatibility with existing code.
+    New code should use get_database_adapter() and get_connection() instead.
     
     Args:
         db_path: Path to SQLite database file
@@ -346,3 +349,73 @@ def init_database(db_path: str | Path) -> sqlite3.Connection:
     _migrate_database(conn)
     
     return conn
+
+
+def get_database_adapter():
+    """
+    Factory function to create the appropriate database adapter based on configuration.
+    
+    This function reads the DATABASE_TYPE from configuration and returns:
+    - SQLiteAdapter for 'sqlite' (default)
+    - SQLAlchemyAdapter for 'postgresql'
+    
+    The adapter provides a consistent interface for database operations
+    regardless of the underlying backend.
+    
+    Returns:
+        DatabaseAdapter instance (SQLiteAdapter or SQLAlchemyAdapter)
+        
+    Raises:
+        ValueError: If DATABASE_TYPE is not supported
+        
+    Example:
+        >>> from src.config import get_config
+        >>> adapter = get_database_adapter()
+        >>> adapter.initialize()
+        >>> conn = adapter.get_connection()
+    """
+    from .adapters import SQLiteAdapter, SQLAlchemyAdapter
+    from ..config import get_config
+    
+    config = get_config()
+    db_type = config.database_type
+    
+    if db_type == 'sqlite':
+        return SQLiteAdapter(config.database_path)
+    elif db_type == 'postgresql':
+        if not config.database_url:
+            raise ValueError(
+                "DATABASE_URL is required when DATABASE_TYPE is 'postgresql'. "
+                "Example: postgresql://user:password@localhost:5432/deviant"
+            )
+        return SQLAlchemyAdapter(config.database_url)
+    else:
+        raise ValueError(
+            f"Unsupported DATABASE_TYPE: '{db_type}'. "
+            f"Supported types: 'sqlite', 'postgresql'"
+        )
+
+
+def get_connection():
+    """
+    Convenience function to get a database connection using the configured adapter.
+    
+    This is the recommended way to obtain database connections in application code.
+    It automatically selects the correct backend based on configuration and
+    returns a connection implementing the DBConnection protocol.
+    
+    Returns:
+        DBConnection instance compatible with all repositories
+        
+    Example:
+        >>> from src.storage.database import get_connection
+        >>> from src.storage.user_repository import UserRepository
+        >>> 
+        >>> conn = get_connection()
+        >>> user_repo = UserRepository(conn)
+        >>> # ... use repository
+        >>> conn.close()
+    """
+    adapter = get_database_adapter()
+    adapter.initialize()
+    return adapter.get_connection()

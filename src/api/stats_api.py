@@ -28,9 +28,7 @@ log_level = getattr(logging, config.log_level.upper(), logging.INFO)
 logger = setup_logger(name="stats_api", log_dir=config.log_dir, level=log_level)
 
 # Create repositories and services (shared DB connection)
-user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories(
-    config.database_path
-)
+user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories()
 auth_service = AuthService(token_repo, logger)
 stats_service = StatsService(stats_repo, deviation_repo, logger)
 

@@ -362,11 +362,69 @@ python run_stats.py
 | `DA_CLIENT_SECRET` | Да | - | Client secret приложения DeviantArt |
 | `DA_REDIRECT_URI` | Нет | `http://localhost:8080/callback` | URI для OAuth redirect |
 | `DA_SCOPES` | Нет | `browse stash publish` | OAuth scopes |
-| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к базе данных SQLite |
+| `DATABASE_TYPE` | Нет | `sqlite` | Тип базы данных (`sqlite` или `postgresql`) |
+| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к базе данных SQLite (для DATABASE_TYPE=sqlite) |
+| `DATABASE_URL` | Нет | - | URL подключения PostgreSQL (для DATABASE_TYPE=postgresql) |
 | `UPLOAD_DIR` | Нет | `upload` | Директория для загрузки изображений |
 | `DONE_DIR` | Нет | `upload/done` | Директория для загруженных изображений |
 | `LOG_DIR` | Нет | `logs` | Директория для лог-файлов |
 | `LOG_LEVEL` | Нет | `INFO` | Уровень логирования |
+
+## Уровень абстракции базы данных
+
+Приложение поддерживает работу с двумя типами баз данных через единый интерфейс: **SQLite** (по умолчанию) и **PostgreSQL** (через SQLAlchemy ORM). Переключение между типами баз данных выполняется через конфигурацию без изменения кода.
+
+### Архитектура
+
+Уровень абстракции следует **шаблону адаптера на основе протокола**:
+
+- **DBConnection Protocol** - минимальный интерфейс (`execute`, `commit`, `close`), от которого зависят все репозитории
+- **SQLiteAdapter** - адаптер для SQLite с существующей схемой и миграциями
+- **SQLAlchemyAdapter** - адаптер для PostgreSQL через SQLAlchemy ORM
+- **Factory Functions** - `get_connection()` и `get_database_adapter()` автоматически выбирают нужный бэкенд
+
+### Переключение между базами данных
+
+**Для использования SQLite** (по умолчанию):
+```env
+DATABASE_TYPE=sqlite
+DATABASE_PATH=data/deviant.db
+```
+
+**Для использования PostgreSQL**:
+```env
+DATABASE_TYPE=postgresql
+DATABASE_URL=postgresql://username:password@localhost:5432/deviant
+```
+
+Изменение кода не требуется — просто обновите `.env` и перезапустите приложение.
+
+### Использование в коде
+
+Все репозитории работают прозрачно с обоими типами баз данных:
+
+```python
+from src.storage import create_repositories
+
+# Автоматически использует настроенную базу данных
+user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories()
+
+# Использовать репозитории как обычно
+user = user_repo.get_user_by_userid('12345')
+
+# Закрыть по завершении (все репозитории используют одно соединение)
+token_repo.close()
+```
+
+### Преимущества
+
+✅ **Легкое переключение** - изменение одной переменной в `.env`  
+✅ **Обратная совместимость** - SQLite остается по умолчанию  
+✅ **Без изменений кода** - все 5 репозиториев работают с обоими бэкендами  
+✅ **Следование SOLID** - инверсия зависимостей через протокол  
+✅ **Расширяемость** - легко добавить MySQL или другие СУБД  
+
+Подробная техническая документация: `doc/drafts/DATABASE_ABSTRACTION.md`
 
 ## Структура проекта
 

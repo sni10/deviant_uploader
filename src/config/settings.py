@@ -36,7 +36,9 @@ class Config:
         self.scopes = os.getenv('DA_SCOPES', 'browse stash publish')
         
         # Database configuration
+        self.database_type = os.getenv('DATABASE_TYPE', 'sqlite').lower()
         self.database_path = Path(os.getenv('DATABASE_PATH', 'data/deviant.db'))
+        self.database_url = os.getenv('DATABASE_URL', '')
         
         # Upload directories
         self.upload_dir = Path(os.getenv('UPLOAD_DIR', 'upload'))
