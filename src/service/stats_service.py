@@ -192,6 +192,9 @@ class StatsService:
             if next_offset is None:
                 break
             offset = next_offset
+            
+            # Rate limiting: wait 3 seconds before next pagination request
+            time.sleep(3)
 
         self.logger.info(
             "Loaded %d deviations from gallery folder %s", len(all_items), folderid
@@ -282,6 +285,11 @@ class StatsService:
 
             payload = response.json()
             all_meta.extend(payload.get("metadata", []))
+            
+            # Rate limiting: wait 3 seconds before next batch request
+            # (skip sleep after the last batch)
+            if i + batch_size < len(deviationids):
+                time.sleep(3)
 
         return all_meta
 
@@ -301,7 +309,7 @@ class StatsService:
             "Fetching detailed deviation data for %d deviations", len(deviationids)
         )
 
-        for deviationid in deviationids:
+        for idx, deviationid in enumerate(deviationids):
             if rate_limited:
                 # Once DeviantArt has signalled a user-level rate limit, we
                 # stop issuing further detail requests in this sync run.
@@ -386,6 +394,11 @@ class StatsService:
                     )
                     details[deviationid] = payload
                 break
+            
+            # Rate limiting: wait 3 seconds before next deviation request
+            # (skip sleep after the last deviation or if rate limited)
+            if not rate_limited and idx < len(deviationids) - 1:
+                time.sleep(3)
 
         return details
 

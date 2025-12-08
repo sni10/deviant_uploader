@@ -7,6 +7,7 @@ This module provides functionality to:
 - Retrieve gallery information by various criteria
 """
 
+import time
 import requests
 from typing import Optional
 from logging import Logger
@@ -95,6 +96,8 @@ class GalleryService:
                 
                 if has_more and next_offset is not None:
                     offset = next_offset
+                    # Rate limiting: wait 3 seconds before next pagination request
+                    time.sleep(3)
                 else:
                     has_more = False
                     

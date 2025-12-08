@@ -212,6 +212,46 @@ CREATE TABLE IF NOT EXISTS deviation_metadata (
 
 CREATE INDEX IF NOT EXISTS idx_deviation_metadata_deviationid ON deviation_metadata(deviationid);
 
+-- Upload presets table: stores reusable upload configuration templates
+CREATE TABLE IF NOT EXISTS upload_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    
+    -- Title generation parameters
+    base_title TEXT NOT NULL,
+    title_increment_start INTEGER DEFAULT 1,
+    last_used_increment INTEGER DEFAULT 1,
+    
+    -- Stash parameters
+    artist_comments TEXT,
+    tags TEXT,  -- JSON array
+    is_ai_generated INTEGER DEFAULT 1,
+    noai INTEGER DEFAULT 0,
+    is_dirty INTEGER DEFAULT 0,
+    
+    -- Publish parameters
+    is_mature INTEGER DEFAULT 0,
+    mature_level TEXT,
+    mature_classification TEXT,  -- JSON array
+    feature INTEGER DEFAULT 1,
+    allow_comments INTEGER DEFAULT 1,
+    display_resolution INTEGER DEFAULT 0,
+    allow_free_download INTEGER DEFAULT 0,
+    add_watermark INTEGER DEFAULT 0,
+    
+    -- Gallery selection
+    gallery_folderid TEXT,
+    
+    -- Metadata
+    is_default INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_upload_presets_name ON upload_presets(name);
+CREATE INDEX IF NOT EXISTS idx_upload_presets_is_default ON upload_presets(is_default);
+
 -- Index for faster status queries
 CREATE INDEX IF NOT EXISTS idx_deviations_status ON deviations(status);
 

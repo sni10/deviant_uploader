@@ -172,6 +172,27 @@ class AuthService:
         # Token is valid
         token = self.token_repository.get_token()
         return token['access_token'] if token else None
+
+    # NOTE: Some callers in the service layer expect a method named
+    # `get_valid_access_token()`. Keep a thin wrapper for backward compatibility
+    # that delegates to the canonical `get_valid_token()` and, if missing,
+    # attempts to authenticate.
+    def get_valid_access_token(self) -> Optional[str]:
+        """Return a valid access token string.
+
+        Compatibility wrapper used by uploader service. Attempts to obtain a
+        valid token; if unavailable, runs ensure_authenticated() and retries.
+        """
+        token = self.get_valid_token()
+        if token:
+            return token
+        # Try to authenticate (may open browser on first run)
+        try:
+            if self.ensure_authenticated():
+                return self.get_valid_token()
+        except Exception as exc:  # noqa: BLE001 — surface via None and logs
+            self.logger.error(f"Failed to ensure authentication: {exc}")
+        return None
     
     def refresh_token(self, refresh_token: str) -> bool:
         """
