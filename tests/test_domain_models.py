@@ -110,6 +110,7 @@ class TestDeviation:
         assert deviation.tags == []
         assert deviation.mature_classification == []
         assert isinstance(deviation.created_at, datetime)
+        assert deviation.published_time is None
     
     def test_deviation_creation_with_tags(self):
         """Test creating a deviation with tags."""

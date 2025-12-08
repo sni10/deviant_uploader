@@ -12,6 +12,7 @@ from .user_repository import UserRepository
 from .oauth_token_repository import OAuthTokenRepository
 from .gallery_repository import GalleryRepository
 from .deviation_repository import DeviationRepository
+from .stats_repository import StatsRepository
 
 __all__ = [
     "BaseRepository",
@@ -19,11 +20,14 @@ __all__ = [
     "OAuthTokenRepository", 
     "GalleryRepository",
     "DeviationRepository",
+    "StatsRepository",
     "create_repositories"
 ]
 
 
-def create_repositories(db_path: str | Path) -> tuple[UserRepository, OAuthTokenRepository, GalleryRepository, DeviationRepository]:
+def create_repositories(
+    db_path: str | Path,
+) -> tuple[UserRepository, OAuthTokenRepository, GalleryRepository, DeviationRepository, StatsRepository]:
     """
     Factory function to create all repositories with shared database connection.
     
@@ -35,11 +39,6 @@ def create_repositories(db_path: str | Path) -> tuple[UserRepository, OAuthToken
         
     Returns:
         Tuple of (UserRepository, OAuthTokenRepository, GalleryRepository, DeviationRepository)
-        
-    Example:
-        >>> user_repo, token_repo, gallery_repo, deviation_repo = create_repositories("data/deviant.db")
-        >>> # Use repositories...
-        >>> user_repo.close()  # Closes connection for all repositories
     """
     conn = init_database(db_path)
     
@@ -47,5 +46,6 @@ def create_repositories(db_path: str | Path) -> tuple[UserRepository, OAuthToken
     token_repo = OAuthTokenRepository(conn)
     gallery_repo = GalleryRepository(conn)
     deviation_repo = DeviationRepository(conn)
+    stats_repo = StatsRepository(conn)
     
-    return user_repo, token_repo, gallery_repo, deviation_repo
+    return user_repo, token_repo, gallery_repo, deviation_repo, stats_repo
