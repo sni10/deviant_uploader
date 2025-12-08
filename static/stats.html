@@ -235,13 +235,13 @@
                         <tr>
                             <th>Thumb</th>
                             <th>Title</th>
-                            <th>Mature</th>
+                            <th class="${getSortClass('is_mature')}" onclick="sortBy('is_mature')">Mature</th>
                             <th class="${getSortClass('views')}" onclick="sortBy('views')">Views</th>
-                            <th>Δ</th>
+                            <th class="${getSortClass('views_diff')}" onclick="sortBy('views_diff')">Δ</th>
                             <th class="${getSortClass('favourites')}" onclick="sortBy('favourites')">Favs</th>
-                            <th>Δ</th>
+                            <th class="${getSortClass('favourites_diff')}" onclick="sortBy('favourites_diff')">Δ</th>
                             <th class="${getSortClass('comments')}" onclick="sortBy('comments')">Comments</th>
-                            <th>Δ</th>
+                            <th class="${getSortClass('comments_diff')}" onclick="sortBy('comments_diff')">Δ</th>
                             <th class="${getSortClass('combined')}" onclick="combinedSort()">Score</th>
                             <th class="${getSortClass('creation_time')}" onclick="sortBy('creation_time')">Published</th>
                         </tr>
