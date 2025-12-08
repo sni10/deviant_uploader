@@ -4,508 +4,212 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeviantArt Upload Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        body { background-color: #f8f9fa; }
+        .status-badge { text-transform: uppercase; font-size: 0.75rem; }
+        .status-draft { background-color: #e9ecef; color: #343a40; }
+        .status-stashing { background-color: #ffeeba; color: #856404; }
+        .status-stashed { background-color: #d1ecf1; color: #0c5460; }
+        .status-publishing { background-color: #cce5ff; color: #004085; }
+        .status-published { background-color: #d4edda; color: #155724; }
+        .status-failed { background-color: #f8d7da; color: #721c24; }
+        .thumbnail { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
+        .overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 1040;
         }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            padding: 20px;
-            color: #e0e0e0;
-        }
-
-        .container {
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-
-        .header {
-            text-align: center;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .header h1 {
-            font-size: 2.5em;
-            color: #fff;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            font-size: 1.1em;
-            color: #a0a0a0;
-        }
-
-        .main-layout {
-            display: grid;
-            grid-template-columns: 350px 1fr;
-            gap: 20px;
-        }
-
-        .sidebar {
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            padding: 20px;
-            height: fit-content;
-            position: sticky;
-            top: 20px;
-        }
-
-        .sidebar h2 {
-            color: #fff;
-            margin-bottom: 15px;
-            font-size: 1.3em;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-        }
-
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: #c0c0c0;
-            font-size: 13px;
-            font-weight: 600;
-        }
-
-        .form-group input[type="text"],
-        .form-group input[type="number"],
-        .form-group textarea,
-        .form-group select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #444;
-            border-radius: 5px;
-            background: #2a2a4a;
-            color: #e0e0e0;
-            font-size: 14px;
-        }
-
-        .form-group textarea {
-            resize: vertical;
-            min-height: 60px;
-        }
-
-        .form-group select {
-            cursor: pointer;
-        }
-
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-
-        .checkbox-group input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-
-        .checkbox-group label {
-            margin: 0;
-            cursor: pointer;
-            font-size: 13px;
-        }
-
-        .section-title {
-            color: #667eea;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin: 20px 0 10px 0;
-            padding-top: 15px;
-            border-top: 1px solid #444;
-        }
-
-        .main-content {
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-
-        .controls {
-            padding: 15px 20px;
-            background: rgba(0,0,0,0.2);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: 600;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
-
-        .btn-success {
-            background: #28a745;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-
-        .btn-warning {
-            background: #ffc107;
-            color: #212529;
-        }
-
-        .status-message {
-            flex: 1;
-            text-align: right;
-            font-size: 14px;
-            color: #28a745;
-        }
-
-        .table-container {
-            padding: 20px;
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        thead {
-            background: rgba(0,0,0,0.3);
-        }
-
-        th {
-            padding: 12px 15px;
-            text-align: left;
-            font-weight: 600;
-            color: #a0a0a0;
-            border-bottom: 2px solid #444;
-            font-size: 13px;
-            text-transform: uppercase;
-        }
-
-        td {
-            padding: 12px 15px;
-            border-bottom: 1px solid #333;
-        }
-
-        tbody tr:hover {
-            background: rgba(255,255,255,0.05);
-        }
-
-        .thumbnail {
-            width: 60px;
-            height: 60px;
-            object-fit: cover;
-            border-radius: 5px;
-            border: 2px solid #444;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 15px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-draft { background: #444; color: #ccc; }
-        .status-stashing { background: #856404; color: #fff3cd; }
-        .status-stashed { background: #0c5460; color: #d1ecf1; }
-        .status-publishing { background: #004085; color: #cce5ff; }
-        .status-published { background: #155724; color: #d4edda; }
-        .status-failed { background: #721c24; color: #f8d7da; }
-
-        .checkbox {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-
+        .overlay.active { display: block; }
         .loading {
             display: none;
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: #2a2a4a;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            z-index: 1000;
+            z-index: 1050;
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            min-width: 260px;
             text-align: center;
-            color: #fff;
         }
-
         .loading.active { display: block; }
-
-        .spinner {
-            border: 4px solid #333;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            z-index: 999;
-        }
-
-        .overlay.active { display: block; }
-
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-
-        .empty-state h2 {
-            font-size: 1.3em;
-            margin-bottom: 10px;
-            color: #888;
-        }
-
-        .preset-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        .preset-actions .btn {
-            flex: 1;
-            padding: 8px 12px;
-            font-size: 12px;
-        }
-
-        .mature-options {
-            background: rgba(0,0,0,0.2);
-            padding: 10px;
-            border-radius: 5px;
-            margin-top: 10px;
-        }
-
-        .mature-options.hidden {
-            display: none;
-        }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🎨 DeviantArt Upload Admin</h1>
-            <p>Upload Manager: Select files → Configure preset → Upload to DeviantArt</p>
+<body class="bg-light">
+    <div class="container py-4">
+        <div class="mb-3">
+            <h1 class="h3 mb-1">DeviantArt Upload Admin</h1>
+            <p class="text-muted small mb-0">Upload Manager: Select files -> Configure preset -> Upload to DeviantArt</p>
         </div>
 
-        <div class="main-layout">
-            <!-- Sidebar: Preset Configuration -->
-            <div class="sidebar">
-                <h2>📋 Preset Configuration</h2>
-                
-                <div class="form-group">
-                    <label>Load Preset</label>
-                    <select id="presetSelect" onchange="onPresetChange()">
-                        <option value="">-- New Preset --</option>
-                    </select>
-                </div>
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h2 class="h6 mb-3">Preset Configuration</h2>
 
-                <div class="form-group">
-                    <label>Preset Name *</label>
-                    <input type="text" id="presetName" placeholder="My Upload Preset">
-                </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Load Preset</label>
+                            <select id="presetSelect" class="form-select form-select-sm" onchange="onPresetChange()">
+                                <option value="">-- New Preset --</option>
+                            </select>
+                        </div>
 
-                <div class="form-group">
-                    <label>Base Title *</label>
-                    <input type="text" id="baseTitle" placeholder="Artwork">
-                </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Preset Name *</label>
+                            <input type="text" id="presetName" class="form-control form-control-sm" placeholder="My Upload Preset">
+                        </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Start Number</label>
-                        <input type="number" id="titleIncrement" value="1" min="1">
+                        <div class="mb-3">
+                            <label class="form-label small">Base Title *</label>
+                            <input type="text" id="baseTitle" class="form-control form-control-sm" placeholder="Artwork">
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label small">Start Number</label>
+                                <input type="number" id="titleIncrement" class="form-control form-control-sm" value="1" min="1">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Gallery</label>
+                                <select id="gallerySelect" class="form-select form-select-sm">
+                                    <option value="">-- No Gallery --</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Tags (comma-separated)</label>
+                            <input type="text" id="tags" class="form-control form-control-sm" placeholder="digital art, ai generated, fantasy">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Artist Comments</label>
+                            <textarea id="artistComments" class="form-control form-control-sm" placeholder="Description for your artwork..." rows="3"></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Display Resolution</label>
+                            <select id="displayResolution" class="form-select form-select-sm">
+                                <option value="0">Original</option>
+                                <option value="1">400px</option>
+                                <option value="2">600px</option>
+                                <option value="3">800px</option>
+                                <option value="4">900px</option>
+                                <option value="5">1024px</option>
+                                <option value="6">1280px</option>
+                                <option value="7">1600px</option>
+                                <option value="8">1920px</option>
+                            </select>
+                        </div>
+
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="isAiGenerated" checked>
+                                <label class="form-check-label small" for="isAiGenerated">AI Generated</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="feature" checked>
+                                <label class="form-check-label small" for="feature">Feature in Browse</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="allowComments" checked>
+                                <label class="form-check-label small" for="allowComments">Allow Comments</label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="allowFreeDownload">
+                                <label class="form-check-label small" for="allowFreeDownload">Allow Free Download</label>
+                            </div>
+                        </div>
+
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="isMature" onchange="toggleMatureOptions()">
+                                <label class="form-check-label small" for="isMature">Contains Mature Content</label>
+                            </div>
+                            <div class="row g-2 mb-2" id="matureOptions" style="display: none;">
+                                <div class="col-12 mb-2">
+                                    <label class="form-label small mb-1">Mature Level</label>
+                                    <select id="matureLevel" class="form-select form-select-sm">
+                                        <option value="">None</option>
+                                        <option value="moderate">Moderate</option>
+                                        <option value="strict">Strict</option>
+                                    </select>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureNudity">
+                                        <label class="form-check-label small" for="matureNudity">Nudity</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureSexual">
+                                        <label class="form-check-label small" for="matureSexual">Sexual</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureGore">
+                                        <label class="form-check-label small" for="matureGore">Gore</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureLanguage">
+                                        <label class="form-check-label small" for="matureLanguage">Language</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureIdeology">
+                                        <label class="form-check-label small" for="matureIdeology">Ideology</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-primary btn-sm" onclick="savePreset()">Save Preset</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Gallery</label>
-                        <select id="gallerySelect">
-                            <option value="">-- No Gallery --</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Tags (comma-separated)</label>
-                    <input type="text" id="tags" placeholder="digital art, ai generated, fantasy">
-                </div>
-
-                <div class="form-group">
-                    <label>Artist Comments</label>
-                    <textarea id="artistComments" placeholder="Description for your artwork..."></textarea>
-                </div>
-
-                <div class="section-title">Display Settings</div>
-                
-                <div class="form-group">
-                    <label>Display Resolution</label>
-                    <select id="displayResolution">
-                        <option value="0">Original</option>
-                        <option value="1">400px</option>
-                        <option value="2">600px</option>
-                        <option value="3">800px</option>
-                        <option value="4">900px</option>
-                        <option value="5">1024px</option>
-                        <option value="6">1280px</option>
-                        <option value="7">1600px</option>
-                        <option value="8">1920px</option>
-                    </select>
-                </div>
-
-                <div class="section-title">Content Options</div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="isAiGenerated" checked>
-                    <label for="isAiGenerated">AI Generated</label>
-                </div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="feature" checked>
-                    <label for="feature">Feature in Browse</label>
-                </div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="allowComments" checked>
-                    <label for="allowComments">Allow Comments</label>
-                </div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="allowFreeDownload">
-                    <label for="allowFreeDownload">Allow Free Download</label>
-                </div>
-
-                <div class="section-title">Mature Content</div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="isMature" onchange="toggleMatureOptions()">
-                    <label for="isMature">Contains Mature Content</label>
-                </div>
-
-                <div class="mature-options hidden" id="matureOptions">
-                    <div class="form-group">
-                        <label>Mature Level</label>
-                        <select id="matureLevel">
-                            <option value="">None</option>
-                            <option value="moderate">Moderate</option>
-                            <option value="strict">Strict</option>
-                        </select>
-                    </div>
-                    
-                    <label style="font-size: 12px; color: #888; margin-bottom: 8px; display: block;">Classification:</label>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="matureNudity">
-                        <label for="matureNudity">Nudity</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="matureSexual">
-                        <label for="matureSexual">Sexual</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="matureGore">
-                        <label for="matureGore">Gore</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="matureLanguage">
-                        <label for="matureLanguage">Language</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="matureIdeology">
-                        <label for="matureIdeology">Ideology</label>
-                    </div>
-                </div>
-
-                <div class="preset-actions">
-                    <button class="btn btn-primary" onclick="savePreset()">💾 Save Preset</button>
                 </div>
             </div>
 
-            <!-- Main Content: File Table -->
-            <div class="main-content">
-                <div class="controls">
-                    <button class="btn btn-primary" onclick="scanFiles()">📂 Scan Files</button>
-                    <button class="btn btn-success" onclick="uploadSelected()" id="uploadBtn" disabled>🚀 Upload Selected</button>
-                    <button class="btn btn-danger" onclick="deleteSelected()" id="deleteBtn" disabled>🗑️ Delete Selected</button>
-                    <div class="status-message" id="statusMessage"></div>
+            <div class="col-lg-8">
+                <div class="card shadow-sm mb-3">
+                    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-primary btn-sm" onclick="scanFiles()">Scan Files</button>
+                            <button class="btn btn-success btn-sm" onclick="uploadSelected()" id="uploadBtn" disabled>Upload Selected</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteSelected()" id="deleteBtn" disabled>Delete Selected</button>
+                        </div>
+                        <div class="ms-auto text-muted small" id="statusMessage"></div>
+                    </div>
                 </div>
 
-                <div class="table-container">
-                    <table id="deviationsTable">
-                        <thead>
-                            <tr>
-                                <th><input type="checkbox" class="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                                <th>Preview</th>
-                                <th>Filename</th>
-                                <th>Title</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tableBody">
-                            <tr>
-                                <td colspan="6" class="empty-state">
-                                    <h2>No files loaded</h2>
-                                    <p>Click "Scan Files" to load images from the upload folder</p>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table id="deviationsTable" class="table table-hover align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 48px;"><input type="checkbox" class="form-check-input" id="selectAll" onchange="toggleSelectAll()"></th>
+                                        <th>Preview</th>
+                                        <th>Filename</th>
+                                        <th>Title</th>
+                                        <th>Status</th>
+                                        <th style="width: 140px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tableBody">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted py-4">
+                                            <div class="fw-semibold mb-1">No files loaded</div>
+                                            <div class="small">Click "Scan Files" to load images from the upload folder</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -513,439 +217,16 @@
 
     <div class="overlay" id="overlay"></div>
     <div class="loading" id="loading">
-        <div class="spinner"></div>
-        <p id="loadingText">Processing...</p>
+        <div class="d-flex flex-column align-items-center gap-2">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mb-0" id="loadingText">Processing...</p>
+        </div>
     </div>
 
-    <script>
-        let deviations = [];
-        let presets = [];
-        let galleries = [];
-        let selectedPresetId = null;
-
-        // Initialize
-        window.onload = function() {
-            loadGalleries();
-            loadPresets();
-            loadDrafts();
-        };
-
-        function showLoading(text = 'Processing...') {
-            document.getElementById('loadingText').textContent = text;
-            document.getElementById('loading').classList.add('active');
-            document.getElementById('overlay').classList.add('active');
-        }
-
-        function hideLoading() {
-            document.getElementById('loading').classList.remove('active');
-            document.getElementById('overlay').classList.remove('active');
-        }
-
-        function setStatus(message, type = 'info') {
-            const statusEl = document.getElementById('statusMessage');
-            statusEl.textContent = message;
-            statusEl.style.color = type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#a0a0a0';
-        }
-
-        function toggleMatureOptions() {
-            const isMature = document.getElementById('isMature').checked;
-            document.getElementById('matureOptions').classList.toggle('hidden', !isMature);
-        }
-
-        async function loadGalleries() {
-            try {
-                const response = await fetch('/api/admin/galleries');
-                const data = await response.json();
-                
-                if (data.success) {
-                    galleries = data.galleries;
-                    const select = document.getElementById('gallerySelect');
-                    select.innerHTML = '<option value="">-- No Gallery --</option>';
-                    
-                    galleries.forEach(gallery => {
-                        const option = document.createElement('option');
-                        option.value = gallery.folderid;
-                        option.textContent = gallery.name + (gallery.size ? ` (${gallery.size})` : '');
-                        select.appendChild(option);
-                    });
-                }
-            } catch (error) {
-                console.error('Failed to load galleries:', error);
-            }
-        }
-
-        async function loadPresets() {
-            try {
-                const response = await fetch('/api/admin/presets');
-                const data = await response.json();
-                
-                if (data.success) {
-                    presets = data.presets;
-                    const select = document.getElementById('presetSelect');
-                    select.innerHTML = '<option value="">-- New Preset --</option>';
-                    
-                    presets.forEach(preset => {
-                        const option = document.createElement('option');
-                        option.value = preset.id;
-                        option.textContent = preset.name + (preset.is_default ? ' (Default)' : '');
-                        select.appendChild(option);
-                    });
-
-                    // Auto-select default preset
-                    const defaultPreset = presets.find(p => p.is_default);
-                    if (defaultPreset) {
-                        select.value = defaultPreset.id;
-                        onPresetChange();
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to load presets:', error);
-                setStatus('Failed to load presets', 'error');
-            }
-        }
-
-        function onPresetChange() {
-            const select = document.getElementById('presetSelect');
-            selectedPresetId = select.value ? parseInt(select.value) : null;
-            
-            if (selectedPresetId) {
-                const preset = presets.find(p => p.id === selectedPresetId);
-                if (preset) {
-                    loadPresetToForm(preset);
-                }
-            } else {
-                clearForm();
-            }
-            updateButtonStates();
-        }
-
-        function loadPresetToForm(preset) {
-            document.getElementById('presetName').value = preset.name || '';
-            document.getElementById('baseTitle').value = preset.base_title || '';
-            document.getElementById('titleIncrement').value = preset.last_used_increment || preset.title_increment_start || 1;
-            document.getElementById('gallerySelect').value = preset.gallery_folderid || '';
-            document.getElementById('tags').value = Array.isArray(preset.tags) ? preset.tags.join(', ') : (preset.tags || '');
-            document.getElementById('artistComments').value = preset.artist_comments || '';
-            document.getElementById('displayResolution').value = preset.display_resolution || 0;
-            document.getElementById('isAiGenerated').checked = preset.is_ai_generated !== false;
-            document.getElementById('feature').checked = preset.feature !== false;
-            document.getElementById('allowComments').checked = preset.allow_comments !== false;
-            document.getElementById('allowFreeDownload').checked = preset.allow_free_download || false;
-            document.getElementById('isMature').checked = preset.is_mature || false;
-            
-            if (preset.is_mature) {
-                document.getElementById('matureLevel').value = preset.mature_level || '';
-                const classifications = preset.mature_classification || [];
-                document.getElementById('matureNudity').checked = classifications.includes('nudity');
-                document.getElementById('matureSexual').checked = classifications.includes('sexual');
-                document.getElementById('matureGore').checked = classifications.includes('gore');
-                document.getElementById('matureLanguage').checked = classifications.includes('language');
-                document.getElementById('matureIdeology').checked = classifications.includes('ideology');
-            }
-            
-            toggleMatureOptions();
-        }
-
-        function clearForm() {
-            document.getElementById('presetName').value = '';
-            document.getElementById('baseTitle').value = '';
-            document.getElementById('titleIncrement').value = 1;
-            document.getElementById('gallerySelect').value = '';
-            document.getElementById('tags').value = '';
-            document.getElementById('artistComments').value = '';
-            document.getElementById('displayResolution').value = 0;
-            document.getElementById('isAiGenerated').checked = true;
-            document.getElementById('feature').checked = true;
-            document.getElementById('allowComments').checked = true;
-            document.getElementById('allowFreeDownload').checked = false;
-            document.getElementById('isMature').checked = false;
-            document.getElementById('matureLevel').value = '';
-            document.getElementById('matureNudity').checked = false;
-            document.getElementById('matureSexual').checked = false;
-            document.getElementById('matureGore').checked = false;
-            document.getElementById('matureLanguage').checked = false;
-            document.getElementById('matureIdeology').checked = false;
-            toggleMatureOptions();
-        }
-
-        function getFormData() {
-            const tags = document.getElementById('tags').value
-                .split(',')
-                .map(t => t.trim())
-                .filter(t => t.length > 0);
-            
-            const matureClassification = [];
-            if (document.getElementById('matureNudity').checked) matureClassification.push('nudity');
-            if (document.getElementById('matureSexual').checked) matureClassification.push('sexual');
-            if (document.getElementById('matureGore').checked) matureClassification.push('gore');
-            if (document.getElementById('matureLanguage').checked) matureClassification.push('language');
-            if (document.getElementById('matureIdeology').checked) matureClassification.push('ideology');
-
-            return {
-                name: document.getElementById('presetName').value,
-                base_title: document.getElementById('baseTitle').value,
-                title_increment_start: parseInt(document.getElementById('titleIncrement').value) || 1,
-                gallery_folderid: document.getElementById('gallerySelect').value || null,
-                tags: tags,
-                artist_comments: document.getElementById('artistComments').value || null,
-                display_resolution: parseInt(document.getElementById('displayResolution').value) || 0,
-                is_ai_generated: document.getElementById('isAiGenerated').checked,
-                feature: document.getElementById('feature').checked,
-                allow_comments: document.getElementById('allowComments').checked,
-                allow_free_download: document.getElementById('allowFreeDownload').checked,
-                is_mature: document.getElementById('isMature').checked,
-                mature_level: document.getElementById('matureLevel').value || null,
-                mature_classification: matureClassification
-            };
-        }
-
-        async function savePreset() {
-            const formData = getFormData();
-            
-            if (!formData.name || !formData.base_title) {
-                setStatus('Preset Name and Base Title are required', 'error');
-                return;
-            }
-
-            showLoading('Saving preset...');
-            
-            try {
-                const response = await fetch('/api/admin/presets', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(formData)
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    setStatus('Preset saved successfully', 'success');
-                    await loadPresets();
-                    // Select the saved preset
-                    document.getElementById('presetSelect').value = data.preset_id;
-                    selectedPresetId = data.preset_id;
-                    updateButtonStates();
-                } else {
-                    setStatus('Save failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Save failed:', error);
-                setStatus('Save failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function loadDrafts() {
-            try {
-                const response = await fetch('/api/admin/drafts');
-                const data = await response.json();
-                
-                if (data.success) {
-                    deviations = data.deviations;
-                    renderTable();
-                    setStatus(`Loaded ${deviations.length} deviations`);
-                }
-            } catch (error) {
-                console.error('Failed to load drafts:', error);
-                setStatus('Failed to load drafts', 'error');
-            }
-        }
-
-        async function scanFiles() {
-            showLoading('Scanning upload folder...');
-            
-            try {
-                const response = await fetch('/api/admin/scan', { method: 'POST' });
-                const data = await response.json();
-                
-                if (data.success) {
-                    deviations = data.drafts;
-                    renderTable();
-                    setStatus(`Scanned: ${data.count} files`, 'success');
-                } else {
-                    setStatus('Scan failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Scan failed:', error);
-                setStatus('Scan failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        function renderTable() {
-            const tbody = document.getElementById('tableBody');
-            
-            if (deviations.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="6" class="empty-state">
-                            <h2>No files found</h2>
-                            <p>Upload images to the upload folder and click "Scan Files"</p>
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            tbody.innerHTML = deviations.map(dev => `
-                <tr>
-                    <td><input type="checkbox" class="checkbox deviation-checkbox" data-id="${dev.id}" onchange="updateButtonStates()"></td>
-                    <td><img src="/api/admin/thumbnail/${dev.id}" alt="${dev.filename}" class="thumbnail" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22%3E%3Crect fill=%22%23333%22 width=%2260%22 height=%2260%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23666%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'"></td>
-                    <td>${dev.filename}</td>
-                    <td>${dev.title || '-'}</td>
-                    <td><span class="status-badge status-${dev.status}">${dev.status}</span></td>
-                    <td><button class="btn btn-danger" style="padding: 5px 10px; font-size: 11px;" onclick="deleteSingle(${dev.id})">Delete</button></td>
-                </tr>
-            `).join('');
-            
-            updateButtonStates();
-        }
-
-        function toggleSelectAll() {
-            const selectAll = document.getElementById('selectAll');
-            document.querySelectorAll('.deviation-checkbox').forEach(cb => cb.checked = selectAll.checked);
-            updateButtonStates();
-        }
-
-        function updateButtonStates() {
-            const selected = getSelectedIds();
-            const hasSelection = selected.length > 0;
-            const hasPresetConfig = document.getElementById('presetName').value && document.getElementById('baseTitle').value;
-            
-            document.getElementById('uploadBtn').disabled = !hasSelection || !hasPresetConfig;
-            document.getElementById('deleteBtn').disabled = !hasSelection;
-        }
-
-        function getSelectedIds() {
-            return Array.from(document.querySelectorAll('.deviation-checkbox:checked')).map(cb => parseInt(cb.dataset.id));
-        }
-
-        async function uploadSelected() {
-            const selectedIds = getSelectedIds();
-            if (selectedIds.length === 0) return;
-
-            // First save or get the preset
-            const formData = getFormData();
-            if (!formData.name || !formData.base_title) {
-                setStatus('Please fill in Preset Name and Base Title', 'error');
-                return;
-            }
-
-            showLoading(`Uploading ${selectedIds.length} files to DeviantArt...`);
-            
-            try {
-                // Save preset first to ensure we have latest settings
-                const presetResponse = await fetch('/api/admin/presets', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(formData)
-                });
-                const presetData = await presetResponse.json();
-                
-                if (!presetData.success) {
-                    setStatus('Failed to save preset: ' + presetData.error, 'error');
-                    hideLoading();
-                    return;
-                }
-
-                const presetId = presetData.preset_id;
-
-                // Now perform the upload
-                const response = await fetch('/api/admin/upload', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        preset_id: presetId,
-                        deviation_ids: selectedIds
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    const results = data.results;
-                    const successCount = results.success ? results.success.length : 0;
-                    const failedCount = results.failed ? results.failed.length : 0;
-                    
-                    await loadDrafts();
-                    await loadPresets(); // Refresh to get updated increment
-                    
-                    if (failedCount === 0) {
-                        setStatus(`Successfully uploaded ${successCount} files!`, 'success');
-                    } else {
-                        setStatus(`Uploaded ${successCount}, failed ${failedCount}`, failedCount > 0 ? 'error' : 'success');
-                    }
-                } else {
-                    setStatus('Upload failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Upload failed:', error);
-                setStatus('Upload failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function deleteSelected() {
-            const selectedIds = getSelectedIds();
-            if (selectedIds.length === 0) return;
-            
-            if (!confirm(`Delete ${selectedIds.length} selected files and their database records?`)) return;
-            
-            showLoading(`Deleting ${selectedIds.length} files...`);
-            
-            try {
-                const response = await fetch('/api/admin/delete', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ deviation_ids: selectedIds })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    await loadDrafts();
-                    setStatus(`Deleted ${data.count} files`, 'success');
-                } else {
-                    setStatus('Delete failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Delete failed:', error);
-                setStatus('Delete failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function deleteSingle(id) {
-            if (!confirm('Delete this file and its database record?')) return;
-            
-            showLoading('Deleting...');
-            
-            try {
-                const response = await fetch('/api/admin/delete', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ deviation_ids: [id] })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    await loadDrafts();
-                    setStatus('File deleted', 'success');
-                } else {
-                    setStatus('Delete failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Delete failed:', error);
-                setStatus('Delete failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <script src="/static/upload_admin.js"></script>
 </body>
 </html>
+
