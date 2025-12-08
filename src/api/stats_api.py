@@ -201,7 +201,9 @@ def create_app(config: Config = None) -> Flask:
     def get_options():
         """Return user and gallery options from the database."""
         try:
-            user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = get_repositories()
+            (user_repo, token_repo, gallery_repo, deviation_repo,
+             deviation_stats_repo, stats_snapshot_repo, 
+             user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
             users = user_repo.get_all_users()
             galleries = gallery_repo.get_all_galleries()
 
@@ -242,8 +244,10 @@ def create_app(config: Config = None) -> Flask:
             if not username:
                 return jsonify({"success": False, "error": "username is required"}), 400
 
-            user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = get_repositories()
-            snapshot = stats_repo.get_latest_user_stats_snapshot(username)
+            (user_repo, token_repo, gallery_repo, deviation_repo,
+             deviation_stats_repo, stats_snapshot_repo, 
+             user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
+            snapshot = user_stats_snapshot_repo.get_latest_user_stats_snapshot(username)
             return jsonify({"success": True, "data": snapshot})
         except Exception as exc:  # noqa: BLE001
             g.logger.error("Failed to fetch latest user stats", exc_info=exc)

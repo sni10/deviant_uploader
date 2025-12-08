@@ -45,7 +45,9 @@ def main():
     logger.info("=" * 60)
     
     # Initialize repositories (following DDD and SOLID principles)
-    user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories()
+    (user_repo, token_repo, gallery_repo, deviation_repo,
+     deviation_stats_repo, stats_snapshot_repo, 
+     user_stats_snapshot_repo, deviation_metadata_repo) = create_repositories()
     logger.info(f"Database initialized: {config.database_type}")
     
     # Initialize services with proper dependency injection
