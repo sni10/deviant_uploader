@@ -2,6 +2,8 @@
 import sqlite3
 from pathlib import Path
 
+from ..log.logger import setup_logger
+
 
 DATABASE_SCHEMA = """
 -- Users table: stores DeviantArt user information
@@ -231,6 +233,8 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
     Args:
         conn: Database connection
     """
+    logger = setup_logger()
+    
     # Migration 1: Add Stash submit fields and publication time to deviations table
     cursor = conn.execute("PRAGMA table_info(deviations)")
     deviation_columns = {row[1] for row in cursor.fetchall()}
@@ -247,18 +251,18 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
             try:
                 conn.execute(f"ALTER TABLE deviations ADD COLUMN {column_name} {column_type}")
                 conn.commit()
-                print(f"✓ Migration: Added column deviations.{column_name}")
+                logger.info(f"Migration: Added column deviations.{column_name}")
             except sqlite3.OperationalError as e:
-                print(f"Warning: Could not add column deviations.{column_name}: {e}")
+                logger.warning(f"Could not add column deviations.{column_name}: {e}")
 
     # Add published_time column for remote deviation publication datetime
     if 'published_time' not in deviation_columns:
         try:
             conn.execute("ALTER TABLE deviations ADD COLUMN published_time TEXT")
             conn.commit()
-            print("✓ Migration: Added column deviations.published_time")
+            logger.info("Migration: Added column deviations.published_time")
         except sqlite3.OperationalError as e:
-            print(f"Warning: Could not add column deviations.published_time: {e}")
+            logger.warning(f"Could not add column deviations.published_time: {e}")
     
     # Migration 2: Add user_id foreign keys to existing tables
     # Check and add user_id to oauth_tokens
@@ -268,9 +272,9 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("ALTER TABLE oauth_tokens ADD COLUMN user_id INTEGER")
             conn.commit()
-            print(f"✓ Migration: Added column oauth_tokens.user_id")
+            logger.info("Migration: Added column oauth_tokens.user_id")
         except sqlite3.OperationalError as e:
-            print(f"Warning: Could not add column oauth_tokens.user_id: {e}")
+            logger.warning(f"Could not add column oauth_tokens.user_id: {e}")
     
     # Check and add user_id to galleries
     cursor = conn.execute("PRAGMA table_info(galleries)")
@@ -279,9 +283,9 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("ALTER TABLE galleries ADD COLUMN user_id INTEGER")
             conn.commit()
-            print(f"✓ Migration: Added column galleries.user_id")
+            logger.info("Migration: Added column galleries.user_id")
         except sqlite3.OperationalError as e:
-            print(f"Warning: Could not add column galleries.user_id: {e}")
+            logger.warning(f"Could not add column galleries.user_id: {e}")
     
     # Check and add user_id to deviations (refresh column list first)
     cursor = conn.execute("PRAGMA table_info(deviations)")
@@ -290,9 +294,9 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("ALTER TABLE deviations ADD COLUMN user_id INTEGER")
             conn.commit()
-            print(f"✓ Migration: Added column deviations.user_id")
+            logger.info("Migration: Added column deviations.user_id")
         except sqlite3.OperationalError as e:
-            print(f"Warning: Could not add column deviations.user_id: {e}")
+            logger.warning(f"Could not add column deviations.user_id: {e}")
 
     # Migration 3: Add is_mature to deviation_stats
     cursor = conn.execute("PRAGMA table_info(deviation_stats)")
@@ -301,18 +305,18 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("ALTER TABLE deviation_stats ADD COLUMN is_mature INTEGER NOT NULL DEFAULT 0")
             conn.commit()
-            print("✓ Migration: Added column deviation_stats.is_mature")
+            logger.info("Migration: Added column deviation_stats.is_mature")
         except sqlite3.OperationalError as e:
-            print(f"Warning: Could not add column deviation_stats.is_mature: {e}")
+            logger.warning(f"Could not add column deviation_stats.is_mature: {e}")
 
     # Migration 4: Add url to deviation_stats
     if 'url' not in deviation_stats_columns:
         try:
             conn.execute("ALTER TABLE deviation_stats ADD COLUMN url TEXT")
             conn.commit()
-            print("✓ Migration: Added column deviation_stats.url")
+            logger.info("Migration: Added column deviation_stats.url")
         except sqlite3.OperationalError as e:
-            print(f"Warning: Could not add column deviation_stats.url: {e}")
+            logger.warning(f"Could not add column deviation_stats.url: {e}")
 
 
 def init_database(db_path: str | Path) -> sqlite3.Connection:

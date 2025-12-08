@@ -16,13 +16,25 @@ import pytest
 from src.service.stats_service import StatsService
 
 
-class _DummyStatsRepository:
-    """Minimal stub for StatsRepository used in tests.
+class _DummyDeviationStatsRepository:
+    """Minimal stub for DeviationStatsRepository used in tests.
 
     The rate-limit behavior under test does not touch the repository, so
     this object intentionally has no methods. It merely satisfies the
     constructor signature of ``StatsService``.
     """
+
+
+class _DummyStatsSnapshotRepository:
+    """Minimal stub for StatsSnapshotRepository used in tests."""
+
+
+class _DummyUserStatsSnapshotRepository:
+    """Minimal stub for UserStatsSnapshotRepository used in tests."""
+
+
+class _DummyDeviationMetadataRepository:
+    """Minimal stub for DeviationMetadataRepository used in tests."""
 
 
 class _DummyDeviationRepository:
@@ -33,7 +45,14 @@ def _build_service() -> StatsService:
     """Create a StatsService instance with dummy dependencies for tests."""
 
     logger = logging.getLogger("stats_service_test")
-    return StatsService(_DummyStatsRepository(), _DummyDeviationRepository(), logger)
+    return StatsService(
+        _DummyDeviationStatsRepository(),
+        _DummyStatsSnapshotRepository(),
+        _DummyUserStatsSnapshotRepository(),
+        _DummyDeviationMetadataRepository(),
+        _DummyDeviationRepository(),
+        logger
+    )
 
 
 class _FakeResponse:

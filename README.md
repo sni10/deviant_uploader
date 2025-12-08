@@ -469,7 +469,10 @@ deviant/
     │   ├── oauth_token_repository.py  # Репозиторий OAuth токенов
      │   ├── gallery_repository.py      # Репозиторий галерей
     │   ├── deviation_repository.py    # Репозиторий девиаций
-    │   └── stats_repository.py        # Репозиторий статистики и снэпшотов
+    │   ├── deviation_stats_repository.py  # Репозиторий текущей статистики девиаций
+    │   ├── stats_snapshot_repository.py   # Репозиторий дневных снэпшотов статистики
+    │   ├── user_stats_snapshot_repository.py  # Репозиторий истории вотчеров пользователя
+    │   └── deviation_metadata_repository.py   # Репозиторий расширенных метаданных девиаций
     ├── service/
     │   ├── __init__.py
     │   ├── auth_service.py     # OAuth2 аутентификация
