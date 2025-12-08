@@ -693,3 +693,119 @@ class StatsService:
             if not row.get("url"):
                 row["url"] = self._build_deviation_url(row)
         return stats
+
+    def get_deviations_list(self) -> list[dict]:
+        """Return list of all deviations with basic info for selection UI.
+
+        Returns:
+            List of dictionaries with deviationid, title, thumb_url
+        """
+        stats = self.deviation_stats_repo.get_all_stats_with_previous()
+        return [
+            {
+                "deviationid": row["deviationid"],
+                "title": row.get("title") or "Untitled",
+                "thumb_url": row.get("thumb_url"),
+            }
+            for row in stats
+        ]
+
+    def get_aggregated_stats(
+        self, period_days: int = 7, deviation_ids: list[str] | None = None
+    ) -> dict:
+        """Return aggregated daily statistics for charts.
+
+        Args:
+            period_days: Number of days to include (default: 7)
+            deviation_ids: Optional list of deviation IDs to filter (None = all)
+
+        Returns:
+            Dictionary with labels (dates) and datasets (views, favourites)
+        """
+        # Build SQL query with optional filtering by deviation IDs
+        if deviation_ids and len(deviation_ids) > 0:
+            placeholders = ",".join("?" * len(deviation_ids))
+            where_clause = f"WHERE deviationid IN ({placeholders}) AND"
+            params = list(deviation_ids) + [period_days]
+        else:
+            where_clause = "WHERE"
+            params = [period_days]
+
+        query = f"""
+            SELECT
+                snapshot_date,
+                SUM(views) as total_views,
+                SUM(favourites) as total_favourites,
+                SUM(comments) as total_comments
+            FROM stats_snapshots
+            {where_clause} snapshot_date >= date('now', '-' || ? || ' days')
+            GROUP BY snapshot_date
+            ORDER BY snapshot_date ASC
+        """
+
+        cursor = self.stats_snapshot_repo.conn.execute(query, params)
+        rows = cursor.fetchall()
+
+        labels = []
+        views_data = []
+        favourites_data = []
+        comments_data = []
+
+        for row in rows:
+            labels.append(row[0])
+            views_data.append(row[1] or 0)
+            favourites_data.append(row[2] or 0)
+            comments_data.append(row[3] or 0)
+
+        return {
+            "labels": labels,
+            "datasets": {
+                "views": views_data,
+                "favourites": favourites_data,
+                "comments": comments_data,
+            },
+        }
+
+    def get_user_watchers_history(
+        self, username: str, period_days: int = 7
+    ) -> dict:
+        """Return user watchers history for charts.
+
+        Args:
+            username: DeviantArt username
+            period_days: Number of days to include (default: 7)
+
+        Returns:
+            Dictionary with labels (dates) and datasets (watchers, friends)
+        """
+        cursor = self.user_stats_snapshot_repo.conn.execute(
+            """
+            SELECT
+                snapshot_date,
+                watchers,
+                friends
+            FROM user_stats_snapshots
+            WHERE username = ?
+                AND snapshot_date >= date('now', '-' || ? || ' days')
+            ORDER BY snapshot_date ASC
+            """,
+            (username, period_days),
+        )
+        rows = cursor.fetchall()
+
+        labels = []
+        watchers_data = []
+        friends_data = []
+
+        for row in rows:
+            labels.append(row[0])
+            watchers_data.append(row[1] or 0)
+            friends_data.append(row[2] or 0)
+
+        return {
+            "labels": labels,
+            "datasets": {
+                "watchers": watchers_data,
+                "friends": friends_data,
+            },
+        }
