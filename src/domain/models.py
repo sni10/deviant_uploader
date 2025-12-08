@@ -54,8 +54,25 @@ class Gallery:
 
 
 class UploadStatus(str, Enum):
-    """Status of a deviation upload."""
+    """Status of a deviation upload.
+    
+    Workflow stages:
+    - NEW: Legacy status for backward compatibility
+    - DRAFT: File scanned, deviation record created, no preset applied
+    - STASHING: Currently uploading to DeviantArt stash
+    - STASHED: Successfully stashed, has itemid
+    - PUBLISHING: Currently publishing from stash
+    - PUBLISHED: Successfully published to DeviantArt
+    - UPLOADING: Legacy status for backward compatibility
+    - DONE: Legacy status for backward compatibility
+    - FAILED: Any stage failed
+    """
     NEW = "new"
+    DRAFT = "draft"
+    STASHING = "stashing"
+    STASHED = "stashed"
+    PUBLISHING = "publishing"
+    PUBLISHED = "published"
     UPLOADING = "uploading"
     DONE = "done"
     FAILED = "failed"
@@ -171,5 +188,47 @@ class DeviationMetadata:
     stats_comments: Optional[int] = None
 
     metadata_id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class UploadPreset:
+    """Upload preset configuration for batch deviation uploads.
+    
+    Stores reusable templates with stash/publish parameters and automatic
+    title generation with incremental numbering.
+    """
+    name: str
+    base_title: str
+    
+    # Title increment settings
+    title_increment_start: int = 1
+    last_used_increment: int = 1
+    
+    # Stash parameters
+    artist_comments: Optional[str] = None
+    tags: list[str] = field(default_factory=list)
+    is_ai_generated: bool = True
+    noai: bool = False
+    is_dirty: bool = False
+    
+    # Publish parameters
+    is_mature: bool = False
+    mature_level: Optional[str] = None
+    mature_classification: list[str] = field(default_factory=list)
+    feature: bool = True
+    allow_comments: bool = True
+    display_resolution: int = 0
+    allow_free_download: bool = False
+    add_watermark: bool = False
+    
+    # Gallery selection
+    gallery_folderid: Optional[str] = None
+    
+    # Metadata
+    preset_id: Optional[int] = None
+    is_default: bool = False
+    description: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)

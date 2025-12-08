@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeviantArt Upload Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <style>
+        body { background-color: #f8f9fa; }
+        .status-badge { text-transform: uppercase; font-size: 0.75rem; }
+        .status-draft { background-color: #e9ecef; color: #343a40; }
+        .status-stashing { background-color: #ffeeba; color: #856404; }
+        .status-stashed { background-color: #d1ecf1; color: #0c5460; }
+        .status-publishing { background-color: #cce5ff; color: #004085; }
+        .status-published { background-color: #d4edda; color: #155724; }
+        .status-failed { background-color: #f8d7da; color: #721c24; }
+        .thumbnail { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
+        .overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 1040;
+        }
+        .overlay.active { display: block; }
+        .loading {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1050;
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            min-width: 260px;
+            text-align: center;
+        }
+        .loading.active { display: block; }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-3">
+        <div class="container py-4">
+            <a class="navbar-brand" href="/static/stats.html">DeviantArt Dashboard</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navMain">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/stats.html">Stats</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="/static/upload_admin.html">Upload Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    <div class="container py-4">
+        <div class="mb-3">
+            <h1 class="h3 mb-1">DeviantArt Upload Admin</h1>
+            <p class="text-muted small mb-0">Upload Manager: Select files -> Configure preset -> Upload to DeviantArt</p>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h2 class="h6 mb-3">Preset Configuration</h2>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Load Preset</label>
+                            <select id="presetSelect" class="form-select form-select-sm" onchange="onPresetChange()">
+                                <option value="">-- New Preset --</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Preset Name *</label>
+                            <input type="text" id="presetName" class="form-control form-control-sm" placeholder="My Upload Preset">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Base Title *</label>
+                            <input type="text" id="baseTitle" class="form-control form-control-sm" placeholder="Artwork">
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label small">Start Number</label>
+                                <input type="number" id="titleIncrement" class="form-control form-control-sm" value="1" min="1">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Gallery</label>
+                                <select id="gallerySelect" class="form-select form-select-sm">
+                                    <option value="">-- No Gallery --</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Tags (comma-separated)</label>
+                            <textarea id="tags" class="form-control form-control-sm" placeholder="digital art, ai generated, fantasy" rows="3"></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Artist Comments</label>
+                            <textarea id="artistComments" class="form-control form-control-sm" placeholder="Description for your artwork..." rows="3"></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Display Resolution</label>
+                            <select id="displayResolution" class="form-select form-select-sm">
+                                <option value="0">Original</option>
+                                <option value="1">400px</option>
+                                <option value="2">600px</option>
+                                <option value="3">800px</option>
+                                <option value="4">900px</option>
+                                <option value="5">1024px</option>
+                                <option value="6">1280px</option>
+                                <option value="7">1600px</option>
+                                <option value="8">1920px</option>
+                            </select>
+                        </div>
+
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="isAiGenerated" checked>
+                                <label class="form-check-label small" for="isAiGenerated">AI Generated</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="feature" checked>
+                                <label class="form-check-label small" for="feature">Feature in Browse</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="allowComments" checked>
+                                <label class="form-check-label small" for="allowComments">Allow Comments</label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="allowFreeDownload">
+                                <label class="form-check-label small" for="allowFreeDownload">Allow Free Download</label>
+                            </div>
+                        </div>
+
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="isMature" onchange="toggleMatureOptions()">
+                                <label class="form-check-label small" for="isMature">Contains Mature Content</label>
+                            </div>
+                            <div class="row g-2 mb-2" id="matureOptions" style="display: none;">
+                                <div class="col-12 mb-2">
+                                    <label class="form-label small mb-1">Mature Level</label>
+                                    <select id="matureLevel" class="form-select form-select-sm">
+                                        <option value="">None</option>
+                                        <option value="moderate">Moderate</option>
+                                        <option value="strict">Strict</option>
+                                    </select>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureNudity">
+                                        <label class="form-check-label small" for="matureNudity">Nudity</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureSexual">
+                                        <label class="form-check-label small" for="matureSexual">Sexual</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureGore">
+                                        <label class="form-check-label small" for="matureGore">Gore</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureLanguage">
+                                        <label class="form-check-label small" for="matureLanguage">Language</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="checkbox" id="matureIdeology">
+                                        <label class="form-check-label small" for="matureIdeology">Ideology</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-primary btn-sm" onclick="savePreset()">Save Preset</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-8">
+                <div class="card shadow-sm mb-3">
+                    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-primary btn-sm" onclick="scanFiles()">Scan Files</button>
+                            <button class="btn btn-success btn-sm" onclick="uploadSelected()" id="uploadBtn" disabled>Upload Selected</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteSelected()" id="deleteBtn" disabled>Delete Selected</button>
+                        </div>
+                        <div class="ms-auto text-muted small" id="statusMessage"></div>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table id="deviationsTable" class="table table-hover align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 48px;"><input type="checkbox" class="form-check-input" id="selectAll" onchange="toggleSelectAll()"></th>
+                                        <th>Preview</th>
+                                        <th>Filename</th>
+                                        <th>Title</th>
+                                        <th>Status</th>
+                                        <th style="width: 140px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tableBody">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted py-4">
+                                            <div class="fw-semibold mb-1">No files loaded</div>
+                                            <div class="small">Click "Scan Files" to load images from the upload folder</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay"></div>
+    <div class="loading" id="loading">
+        <div class="d-flex flex-column align-items-center gap-2">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mb-0" id="loadingText">Processing...</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <script src="/static/upload_admin.js"></script>
+</body>
+</html>
+

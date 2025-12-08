@@ -5,6 +5,10 @@ from typing import Optional
 from dotenv import load_dotenv
 
 
+# Project root directory (parent of src/)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
 class Config:
     """
     Configuration class for DeviantArt uploader.
@@ -37,15 +41,19 @@ class Config:
         
         # Database configuration
         self.database_type = os.getenv('DATABASE_TYPE', 'sqlite').lower()
-        self.database_path = Path(os.getenv('DATABASE_PATH', 'data/deviant.db'))
+        database_path_env = os.getenv('DATABASE_PATH', 'data/deviant.db')
+        self.database_path = self._resolve_path(database_path_env)
         self.database_url = os.getenv('DATABASE_URL', '')
         
-        # Upload directories
-        self.upload_dir = Path(os.getenv('UPLOAD_DIR', 'upload'))
-        self.done_dir = Path(os.getenv('DONE_DIR', 'upload/done'))
+        # Upload directories (resolve to absolute paths from project root)
+        upload_dir_env = os.getenv('UPLOAD_DIR', 'upload')
+        done_dir_env = os.getenv('DONE_DIR', 'upload/done')
+        self.upload_dir = self._resolve_path(upload_dir_env)
+        self.done_dir = self._resolve_path(done_dir_env)
         
         # Logging configuration
-        self.log_dir = Path(os.getenv('LOG_DIR', 'logs'))
+        log_dir_env = os.getenv('LOG_DIR', 'logs')
+        self.log_dir = self._resolve_path(log_dir_env)
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         
         # API endpoints
@@ -66,6 +74,24 @@ class Config:
         
         # Validate required configuration
         self._validate()
+    
+    def _resolve_path(self, path_str: str) -> Path:
+        """
+        Resolve a path string to an absolute Path.
+        
+        If the path is already absolute, returns it as-is.
+        If relative, resolves it relative to PROJECT_ROOT.
+        
+        Args:
+            path_str: Path string from environment variable
+            
+        Returns:
+            Absolute Path object
+        """
+        path = Path(path_str)
+        if path.is_absolute():
+            return path
+        return (PROJECT_ROOT / path).resolve()
     
     def _validate(self):
         """Validate that required configuration is present."""
