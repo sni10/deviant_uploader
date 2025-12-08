@@ -158,19 +158,17 @@ class TestDatabaseFactory:
     
     def test_get_database_adapter_sqlite(self, monkeypatch):
         """Test get_database_adapter returns SQLiteAdapter for sqlite type."""
-        # Mock config to return sqlite type
-        from src.config import Config
-        
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
             db_path = tmp.name
         
         try:
-            # Create a mock config
+            # Create a mock config object without triggering validation
+            class MockConfig:
+                database_type = 'sqlite'
+                database_path = Path(db_path)
+            
             def mock_get_config():
-                config = Config()
-                config.database_type = 'sqlite'
-                config.database_path = Path(db_path)
-                return config
+                return MockConfig()
             
             monkeypatch.setattr('src.config.get_config', mock_get_config)
             
@@ -182,12 +180,12 @@ class TestDatabaseFactory:
     
     def test_get_database_adapter_unsupported_type(self, monkeypatch):
         """Test get_database_adapter raises error for unsupported type."""
-        from src.config import Config
+        # Create a mock config object without triggering validation
+        class MockConfig:
+            database_type = 'mongodb'  # Unsupported
         
         def mock_get_config():
-            config = Config()
-            config.database_type = 'mongodb'  # Unsupported
-            return config
+            return MockConfig()
         
         monkeypatch.setattr('src.config.get_config', mock_get_config)
         
@@ -196,17 +194,17 @@ class TestDatabaseFactory:
     
     def test_get_connection_function(self, monkeypatch):
         """Test get_connection convenience function."""
-        from src.config import Config
-        
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
             db_path = tmp.name
         
         try:
+            # Create a mock config object without triggering validation
+            class MockConfig:
+                database_type = 'sqlite'
+                database_path = Path(db_path)
+            
             def mock_get_config():
-                config = Config()
-                config.database_type = 'sqlite'
-                config.database_path = Path(db_path)
-                return config
+                return MockConfig()
             
             monkeypatch.setattr('src.config.get_config', mock_get_config)
             

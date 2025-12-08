@@ -1,12 +1,14 @@
 # Загрузчик изображений на DeviantArt
 
-[![CI](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Release](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
+> **Language**: [English](README_EN.md)
+
+[![CI](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/ci.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/release.yml?style=for-the-badge&logo=github&label=Release)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader?style=for-the-badge&logo=github)](https://github.com/sni10/deviant_uploader/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-66%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-47%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 
 
 
