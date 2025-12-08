@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull:*)"
+    ],
+    "deny": [
+      "Bash(git config user.*:*)",
+      "Bash(git config --global:*)",
+      "Bash(git commit --author*:*)"
+    ],
+    "ask": []
+  },
+  "hooks": {}
+}
