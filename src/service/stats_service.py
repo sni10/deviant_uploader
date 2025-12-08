@@ -506,7 +506,6 @@ class StatsService:
         access_token: str,
         folderid: str,
         username: Optional[str] = None,
-        include_deviations: bool = False,
     ) -> dict:
         """Fetch gallery deviations, pull stats, persist current and snapshot.
 
@@ -514,16 +513,13 @@ class StatsService:
             access_token: OAuth2 access token.
             folderid: DeviantArt gallery folder identifier.
             username: Optional DeviantArt username (for shared galleries).
-            include_deviations: If True, also fetch /deviation/{id} details and
-            enrich the local deviations table (heavier, more API calls).
         """
 
         today = date.today().isoformat()
         self.logger.info(
-            "Starting stats sync for folder %s (username=%s, include_deviations=%s)",
+            "Starting stats sync for folder %s (username=%s)",
             folderid,
             username or "-",
-            include_deviations,
         )
 
         # Snapshot user stats (watchers, friends) BEFORE fetching deviations
@@ -560,17 +556,12 @@ class StatsService:
 
         keys = list(deviation_map.keys())
         metadata = self._fetch_metadata(access_token, keys)
-        deviation_details: dict[str, dict]
-        if include_deviations:
-            deviation_details = self._fetch_deviation_details(access_token, keys)
-        else:
-            deviation_details = {}
+
         for meta in metadata:
             deviationid = meta.get("deviationid")
             stats = meta.get("stats", {}) if meta else {}
             submission = meta.get("submission") or {}
             basic = deviation_map.get(deviationid, {})
-            details = deviation_details.get(deviationid, {}) if include_deviations else {}
             if meta is not None:
                 is_mature = bool(
                     meta.get("is_mature")
@@ -610,28 +601,6 @@ class StatsService:
                 favourites=stats.get("favourites", 0),
                 comments=stats.get("comments", 0),
             )
-
-            # Optionally enrich the deviations table with publication time from
-            # /deviation/{deviationid}. This may be expensive, so it is only
-            # executed when explicitly requested by the caller.
-            if include_deviations:
-                published_time = details.get("published_time") if details else None
-                if published_time is not None:
-                    try:
-                        self.deviation_repository.update_published_time_by_deviationid(
-                            deviationid, published_time
-                        )
-                        self.logger.info(
-                            "Updated deviation %s published_time to %s",
-                            deviationid,
-                            published_time,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        self.logger.error(
-                            "Failed to update published_time for deviation %s: %s",
-                            deviationid,
-                            exc,
-                        )
 
             self.deviation_metadata_repo.save_metadata(
                 deviationid=deviationid,
@@ -693,3 +662,119 @@ class StatsService:
             if not row.get("url"):
                 row["url"] = self._build_deviation_url(row)
         return stats
+
+    def get_deviations_list(self) -> list[dict]:
+        """Return list of all deviations with basic info for selection UI.
+
+        Returns:
+            List of dictionaries with deviationid, title, thumb_url
+        """
+        stats = self.deviation_stats_repo.get_all_stats_with_previous()
+        return [
+            {
+                "deviationid": row["deviationid"],
+                "title": row.get("title") or "Untitled",
+                "thumb_url": row.get("thumb_url"),
+            }
+            for row in stats
+        ]
+
+    def get_aggregated_stats(
+        self, period_days: int = 7, deviation_ids: list[str] | None = None
+    ) -> dict:
+        """Return aggregated daily statistics for charts.
+
+        Args:
+            period_days: Number of days to include (default: 7)
+            deviation_ids: Optional list of deviation IDs to filter (None = all)
+
+        Returns:
+            Dictionary with labels (dates) and datasets (views, favourites)
+        """
+        # Build SQL query with optional filtering by deviation IDs
+        if deviation_ids and len(deviation_ids) > 0:
+            placeholders = ",".join("?" * len(deviation_ids))
+            where_clause = f"WHERE deviationid IN ({placeholders}) AND"
+            params = list(deviation_ids) + [period_days]
+        else:
+            where_clause = "WHERE"
+            params = [period_days]
+
+        query = f"""
+            SELECT
+                snapshot_date,
+                SUM(views) as total_views,
+                SUM(favourites) as total_favourites,
+                SUM(comments) as total_comments
+            FROM stats_snapshots
+            {where_clause} snapshot_date >= date('now', '-' || ? || ' days')
+            GROUP BY snapshot_date
+            ORDER BY snapshot_date ASC
+        """
+
+        cursor = self.stats_snapshot_repo.conn.execute(query, params)
+        rows = cursor.fetchall()
+
+        labels = []
+        views_data = []
+        favourites_data = []
+        comments_data = []
+
+        for row in rows:
+            labels.append(row[0])
+            views_data.append(row[1] or 0)
+            favourites_data.append(row[2] or 0)
+            comments_data.append(row[3] or 0)
+
+        return {
+            "labels": labels,
+            "datasets": {
+                "views": views_data,
+                "favourites": favourites_data,
+                "comments": comments_data,
+            },
+        }
+
+    def get_user_watchers_history(
+        self, username: str, period_days: int = 7
+    ) -> dict:
+        """Return user watchers history for charts.
+
+        Args:
+            username: DeviantArt username
+            period_days: Number of days to include (default: 7)
+
+        Returns:
+            Dictionary with labels (dates) and datasets (watchers, friends)
+        """
+        cursor = self.user_stats_snapshot_repo.conn.execute(
+            """
+            SELECT
+                snapshot_date,
+                watchers,
+                friends
+            FROM user_stats_snapshots
+            WHERE username = ?
+                AND snapshot_date >= date('now', '-' || ? || ' days')
+            ORDER BY snapshot_date ASC
+            """,
+            (username, period_days),
+        )
+        rows = cursor.fetchall()
+
+        labels = []
+        watchers_data = []
+        friends_data = []
+
+        for row in rows:
+            labels.append(row[0])
+            watchers_data.append(row[1] or 0)
+            friends_data.append(row[2] or 0)
+
+        return {
+            "labels": labels,
+            "datasets": {
+                "watchers": watchers_data,
+                "friends": friends_data,
+            },
+        }
