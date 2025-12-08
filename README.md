@@ -1,12 +1,14 @@
 # Загрузчик изображений на DeviantArt
 
-[![CI](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Release](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml/badge.svg)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green?logo=opensourceinitiative&logoColor=white)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader?logo=github)](https://github.com/sni10/deviant_uploader/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen?logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+> **Language**: [English](README_EN.md)
+
+[![CI](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/ci.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/release.yml?style=for-the-badge&logo=github&label=Release)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader?style=for-the-badge&logo=github)](https://github.com/sni10/deviant_uploader/releases/latest)
+[![Tests](https://img.shields.io/badge/tests-66%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-47%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 
 
 
@@ -27,6 +29,7 @@
 - **Логирование**: Подробное логирование с ротацией
 - **Конфигурация**: Настройка через переменные окружения
 - **Восстановление**: Восстанавливает застрявшие загрузки после сбоев
+- **Панель статистики**: Веб-дашборд на Flask с API для просмотра текущей статистики девиаций, дневных снэпшотов и истории вотчеров, а также расширенных метаданных по работам.
 
 ## Архитектура
 
@@ -322,6 +325,35 @@ uploader.upload_single(
 token_repo.close()
 ```
 
+### Панель статистики DeviantArt
+
+Панель статистики предоставляет веб-интерфейс и REST API для просмотра актуальных метрик по девиациям и истории вотчеров.
+
+**Что умеет дашборд:**
+- Показывает текущие просмотры, избранное и комментарии по всем девиациям в выбранной галерее
+- Строит дневные дельты (рост/падение) по просмотрам, избранному и комментариям
+- Отображает расширенные метаданные (миниатюра, заголовок, дата публикации)
+- Показывает в шапке количество вотчеров пользователя и изменение за последний день
+
+**Как запустить панель статистики:**
+1. Убедитесь, что уже выполнена базовая настройка (`.env`, `python main.py`, `python fetch_user.py`, `python fetch_galleries.py`) и база данных содержит пользователя, галереи и девиации.
+2. Установите зависимости (Flask уже прописан в `requirements.txt`).
+3. Запустите сервер статистики:
+
+```bash
+python run_stats.py
+```
+
+4. Откройте в браузере `http://localhost:5000` — отобразится страница `static/stats.html`.
+
+**Доступные HTTP‑endpoint'ы:**
+- `GET /api/stats` — текущая статистика девиаций с дневными дельтами
+- `POST /api/stats/sync` — принудительная синхронизация статистики для выбранной галереи
+- `GET /api/options` — список пользователей и галерей для заполнения выпадающих списков на дашборде
+- `GET /api/user_stats/latest?username=...` — последние снэпшоты статистики пользователя (в том числе вотчеры и их дельта)
+
+Синхронизация работает через `AuthService` и `StatsService` и учитывает rate limit DeviantArt: при получении ответа `429 user_api_threshold` сервис делает несколько попыток с экспоненциальным backoff и безопасно останавливает текущий прогон, не «забанивая» токен.
+
 ## Конфигурация
 
 Вся конфигурация выполняется через переменные окружения:
@@ -332,11 +364,69 @@ token_repo.close()
 | `DA_CLIENT_SECRET` | Да | - | Client secret приложения DeviantArt |
 | `DA_REDIRECT_URI` | Нет | `http://localhost:8080/callback` | URI для OAuth redirect |
 | `DA_SCOPES` | Нет | `browse stash publish` | OAuth scopes |
-| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к базе данных SQLite |
+| `DATABASE_TYPE` | Нет | `sqlite` | Тип базы данных (`sqlite` или `postgresql`) |
+| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к базе данных SQLite (для DATABASE_TYPE=sqlite) |
+| `DATABASE_URL` | Нет | - | URL подключения PostgreSQL (для DATABASE_TYPE=postgresql) |
 | `UPLOAD_DIR` | Нет | `upload` | Директория для загрузки изображений |
 | `DONE_DIR` | Нет | `upload/done` | Директория для загруженных изображений |
 | `LOG_DIR` | Нет | `logs` | Директория для лог-файлов |
 | `LOG_LEVEL` | Нет | `INFO` | Уровень логирования |
+
+## Уровень абстракции базы данных
+
+Приложение поддерживает работу с двумя типами баз данных через единый интерфейс: **SQLite** (по умолчанию) и **PostgreSQL** (через SQLAlchemy ORM). Переключение между типами баз данных выполняется через конфигурацию без изменения кода.
+
+### Архитектура
+
+Уровень абстракции следует **шаблону адаптера на основе протокола**:
+
+- **DBConnection Protocol** - минимальный интерфейс (`execute`, `commit`, `close`), от которого зависят все репозитории
+- **SQLiteAdapter** - адаптер для SQLite с существующей схемой и миграциями
+- **SQLAlchemyAdapter** - адаптер для PostgreSQL через SQLAlchemy ORM
+- **Factory Functions** - `get_connection()` и `get_database_adapter()` автоматически выбирают нужный бэкенд
+
+### Переключение между базами данных
+
+**Для использования SQLite** (по умолчанию):
+```env
+DATABASE_TYPE=sqlite
+DATABASE_PATH=data/deviant.db
+```
+
+**Для использования PostgreSQL**:
+```env
+DATABASE_TYPE=postgresql
+DATABASE_URL=postgresql://username:password@localhost:5432/deviant
+```
+
+Изменение кода не требуется — просто обновите `.env` и перезапустите приложение.
+
+### Использование в коде
+
+Все репозитории работают прозрачно с обоими типами баз данных:
+
+```python
+from src.storage import create_repositories
+
+# Автоматически использует настроенную базу данных
+user_repo, token_repo, gallery_repo, deviation_repo, stats_repo = create_repositories()
+
+# Использовать репозитории как обычно
+user = user_repo.get_user_by_userid('12345')
+
+# Закрыть по завершении (все репозитории используют одно соединение)
+token_repo.close()
+```
+
+### Преимущества
+
+✅ **Легкое переключение** - изменение одной переменной в `.env`  
+✅ **Обратная совместимость** - SQLite остается по умолчанию  
+✅ **Без изменений кода** - все 5 репозиториев работают с обоими бэкендами  
+✅ **Следование SOLID** - инверсия зависимостей через протокол  
+✅ **Расширяемость** - легко добавить MySQL или другие СУБД  
+
+Подробная техническая документация: `doc/drafts/DATABASE_ABSTRACTION.md`
 
 ## Структура проекта
 
@@ -347,37 +437,51 @@ deviant/
 ├── main.py                     # Точка входа приложения (загрузка с шаблоном)
 ├── fetch_user.py               # Скрипт синхронизации информации о пользователе
 ├── fetch_galleries.py          # Скрипт синхронизации галерей из DeviantArt
+├── run_stats.py                # Запуск веб-дашборда статистики (Flask)
 ├── requirements.txt            # Python зависимости
 ├── .env.example                # Пример конфигурации окружения
 ├── upload_template.json.example # Пример шаблона загрузки
 ├── upload_template.json        # Ваши настройки загрузки (в .gitignore)
 ├── data/                       # Хранилище базы данных SQLite
 ├── logs/                       # Логи приложения
+├── static/                     # Веб-интерфейс дашборда статистики (stats.html)
 ├── upload/                     # Изображения для загрузки (источник)
 │   ├── *.png                  # Файлы изображений
 │   ├── *.png.json             # Метаданные для каждого изображения (itemid)
 │   └── done/                  # Успешно загруженные изображения
+├── tests/                      # Тесты (pytest)
+│   ├── __init__.py
+│   ├── test_domain_models.py   # Тесты доменных моделей
+│   └── test_stats_service.py   # Тесты сервиса статистики и обработки rate limit
 └── src/
     ├── config/
     │   ├── __init__.py
     │   └── settings.py         # Singleton конфигурации
     ├── domain/
     │   ├── __init__.py
-    │   └── models.py           # Доменные сущности (User, Gallery, Deviation)
+     │   └── models.py           # Доменные сущности (User, Gallery, Deviation)
+    ├── api/
+    │   ├── __init__.py
+    │   └── stats_api.py        # Flask API для дашборда статистики
     ├── storage/
     │   ├── __init__.py
     │   ├── database.py         # Схема базы данных
     │   ├── base_repository.py  # Базовый репозиторий
     │   ├── user_repository.py  # Репозиторий пользователей
     │   ├── oauth_token_repository.py  # Репозиторий OAuth токенов
-    │   ├── gallery_repository.py      # Репозиторий галерей
-    │   └── deviation_repository.py    # Репозиторий девиаций
+     │   ├── gallery_repository.py      # Репозиторий галерей
+    │   ├── deviation_repository.py    # Репозиторий девиаций
+    │   ├── deviation_stats_repository.py  # Репозиторий текущей статистики девиаций
+    │   ├── stats_snapshot_repository.py   # Репозиторий дневных снэпшотов статистики
+    │   ├── user_stats_snapshot_repository.py  # Репозиторий истории вотчеров пользователя
+    │   └── deviation_metadata_repository.py   # Репозиторий расширенных метаданных девиаций
     ├── service/
     │   ├── __init__.py
     │   ├── auth_service.py     # OAuth2 аутентификация
     │   ├── user_service.py     # Управление пользователями
     │   ├── gallery_service.py  # Управление галереями
-    │   └── uploader.py         # Сервис загрузки с поддержкой шаблонов
+    │   ├── uploader.py         # Сервис загрузки с поддержкой шаблонов
+    │   └── stats_service.py    # Сервис сбора и агрегации статистики DeviantArt
     ├── log/
     │   ├── __init__.py
     │   └── logger.py           # Конфигурация логирования
@@ -426,7 +530,49 @@ deviant/
 - Ссылка на галерею: `gallery_id` (связь с таблицей galleries)
 - Результаты загрузки: URL, deviation ID, itemid
 - Сообщения об ошибках
-- Временные метки: `created_at`, `uploaded_at`
+- Временные метки: `created_at`, `uploaded_at`, а также удалённое время публикации девиации на DeviantArt (`published_time`)
+
+### deviation_stats
+Хранит текущую агрегированную статистику девиаций:
+- `id` - Внутренний ID базы данных
+- `deviationid` - UUID девиации DeviantArt (уникальный)
+- `title` - Заголовок девиации
+- `thumb_url` - URL превью
+- `is_mature` - Флаг контента для взрослых
+- Метрики отклика: `views`, `favourites`, `comments`
+- `gallery_folderid` - UUID папки галереи на DeviantArt
+- `url` - Публичный URL девиации
+- Временные метки: `created_at`, `updated_at`
+
+### stats_snapshots
+Хранит дневные снэпшоты статистики девиаций:
+- `id` - Внутренний ID базы данных
+- `deviationid` - UUID девиации DeviantArt
+- `snapshot_date` - Дата снэпшота (YYYY-MM-DD)
+- Метрики отклика на дату: `views`, `favourites`, `comments`
+- Временные метки: `created_at`, `updated_at`
+
+### user_stats_snapshots
+Хранит историю количества вотчеров и друзей пользователя:
+- `id` - Внутренний ID базы данных
+- `user_id` - Связь с таблицей users (к какому пользователю относится снэпшот)
+- `username` - Имя пользователя DeviantArt
+- `snapshot_date` - Дата снэпшота (YYYY-MM-DD)
+- `watchers` - Количество вотчеров на дату снэпшота
+- `friends` - Количество друзей на дату снэпшота
+- Временные метки: `created_at`, `updated_at`
+
+### deviation_metadata
+Хранит расширенные метаданные и детальную статистику по девиации:
+- `id` - Внутренний ID базы данных
+- `deviationid` - UUID девиации DeviantArt (уникальный)
+- Основные поля: `title`, `description`, `license`, `allows_comments`
+- Флаги и статус: `is_favourited`, `is_watching`, `is_mature`, `mature_level`, `mature_classification`
+- Автор и атрибуты: `author`, `creation_time`, `category`, `file_size`, `resolution`, `camera`
+- Транспорт и коллекции: `submitted_with`, `collections`, `galleries`
+- Права и взаимодействие: `can_post_comment`
+- Детальная статистика: `stats_views_today`, `stats_downloads_today`, `stats_downloads`, `stats_views`, `stats_favourites`, `stats_comments`
+- Временные метки: `created_at`, `updated_at`
 
 ## Принципы проектирования
 

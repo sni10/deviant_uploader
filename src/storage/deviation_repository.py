@@ -35,8 +35,8 @@ class DeviationRepository(BaseRepository):
                 is_ai_generated, noai,
                 artist_comments, original_url, is_dirty, stack, stackid,
                 itemid, gallery_id, deviationid, url, error,
-                created_at, uploaded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, uploaded_at, published_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 deviation.filename,
@@ -45,7 +45,9 @@ class DeviationRepository(BaseRepository):
                 deviation.status.value,
                 1 if deviation.is_mature else 0,
                 deviation.mature_level,
-                json.dumps(deviation.mature_classification) if deviation.mature_classification else None,
+                json.dumps(deviation.mature_classification)
+                if deviation.mature_classification
+                else None,
                 1 if deviation.feature else 0,
                 1 if deviation.allow_comments else 0,
                 deviation.display_resolution,
@@ -65,8 +67,9 @@ class DeviationRepository(BaseRepository):
                 deviation.url,
                 deviation.error,
                 deviation.created_at.isoformat(),
-                deviation.uploaded_at.isoformat() if deviation.uploaded_at else None
-            )
+                deviation.uploaded_at.isoformat() if deviation.uploaded_at else None,
+                deviation.published_time,
+            ),
         )
         self.conn.commit()
         deviation.deviation_id = cursor.lastrowid
@@ -126,7 +129,7 @@ class DeviationRepository(BaseRepository):
                    is_ai_generated, noai,
                    artist_comments, original_url, is_dirty, stack, stackid,
                    itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at
+                   created_at, uploaded_at, published_time
             FROM deviations
             WHERE id = ?
             """,
@@ -158,7 +161,7 @@ class DeviationRepository(BaseRepository):
                    is_ai_generated, noai,
                    artist_comments, original_url, is_dirty, stack, stackid,
                    itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at
+                   created_at, uploaded_at, published_time
             FROM deviations
             WHERE filename = ?
             """,
@@ -190,7 +193,7 @@ class DeviationRepository(BaseRepository):
                    is_ai_generated, noai,
                    artist_comments, original_url, is_dirty, stack, stackid,
                    itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at
+                   created_at, uploaded_at, published_time
             FROM deviations
             WHERE status = ?
             ORDER BY created_at
@@ -216,7 +219,7 @@ class DeviationRepository(BaseRepository):
                    is_ai_generated, noai,
                    artist_comments, original_url, is_dirty, stack, stackid,
                    itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at
+                   created_at, uploaded_at, published_time
             FROM deviations
             ORDER BY created_at DESC
             """
@@ -282,5 +285,25 @@ class DeviationRepository(BaseRepository):
             error=row[25],
             created_at=datetime.fromisoformat(row[26]),
             uploaded_at=datetime.fromisoformat(row[27]) if row[27] else None,
-            deviation_id=row[0]
+            published_time=row[28],
+            deviation_id=row[0],
         )
+
+    def update_published_time_by_deviationid(
+        self, deviationid: str, published_time: Optional[str]
+    ) -> None:
+        """Update published_time for an existing deviation by its DeviantArt ID.
+
+        This is used by stats sync when enriching existing uploads with
+        data from the /deviation/{deviationid} endpoint.
+        """
+
+        self.conn.execute(
+            """
+            UPDATE deviations
+            SET published_time = ?
+            WHERE deviationid = ?
+            """,
+            (published_time, deviationid),
+        )
+        self.conn.commit()

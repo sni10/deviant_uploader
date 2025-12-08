@@ -82,3 +82,6 @@ cython_debug/
 upload_template.json
 .junie/
 /.claude/
+/local/
+/PROBLEM_ARCH.md
+/AGENTS.md
