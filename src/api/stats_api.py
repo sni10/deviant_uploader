@@ -125,6 +125,21 @@ def get_options():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/api/user_stats/latest", methods=["GET"])
+def get_latest_user_stats():
+    """Return the latest user stats snapshot for a given username."""
+    try:
+        username = (request.args.get("username") or "").strip()
+        if not username:
+            return jsonify({"success": False, "error": "username is required"}), 400
+
+        snapshot = stats_repo.get_latest_user_stats_snapshot(username)
+        return jsonify({"success": True, "data": snapshot})
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch latest user stats", exc_info=exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route("/static/<path:filename>")
 def serve_static(filename: str):
     """Serve other static assets if needed."""

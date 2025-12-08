@@ -140,8 +140,8 @@ CREATE TABLE IF NOT EXISTS deviation_stats (
 
 CREATE INDEX IF NOT EXISTS idx_deviation_stats_deviationid ON deviation_stats(deviationid);
 
--- Daily snapshots of deviation statistics
-CREATE TABLE IF NOT EXISTS stats_snapshots (
+    -- Daily snapshots of deviation statistics
+    CREATE TABLE IF NOT EXISTS stats_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     deviationid TEXT NOT NULL,
     snapshot_date TEXT NOT NULL,
@@ -155,6 +155,22 @@ CREATE TABLE IF NOT EXISTS stats_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_stats_snapshots_date ON stats_snapshots(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_stats_snapshots_deviationid ON stats_snapshots(deviationid);
+
+-- Daily snapshots of user watcher statistics
+CREATE TABLE IF NOT EXISTS user_stats_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    watchers INTEGER DEFAULT 0,
+    friends INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(username, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_stats_snapshots_username_date
+    ON user_stats_snapshots(username, snapshot_date);
 
 -- Extended deviation metadata (latest snapshot from DeviantArt)
 CREATE TABLE IF NOT EXISTS deviation_metadata (

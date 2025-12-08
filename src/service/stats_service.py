@@ -380,6 +380,105 @@ class StatsService:
 
         return details
 
+    def _snapshot_user_stats(
+        self,
+        access_token: str,
+        username: Optional[str],
+        snapshot_date: str,
+    ) -> Optional[dict]:
+        """Snapshot user.stats (watchers, friends) for the given date.
+
+        Args:
+            access_token: OAuth2 access token.
+            username: DeviantArt username to fetch profile for.
+            snapshot_date: ISO date string (YYYY-MM-DD) for the snapshot.
+
+        Returns:
+            Dictionary with username, snapshot_date, watchers, friends, profile_url,
+            watchers_diff (daily change), yesterday_watchers; or None if the
+            operation failed or username is missing.
+        """
+
+        if not username:
+            self.logger.info("No username provided; skipping user watcher snapshot")
+            return None
+
+        url = f"{self.BASE_URL}/user/profile/{username}"
+        params: dict[str, str] = {
+            "access_token": access_token,
+            "expand": "user.stats",
+            "with_session": "false",
+        }
+
+        self.logger.info("Fetching user profile for snapshot: %s", username)
+
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error("Failed to fetch user profile %s: %s", username, exc)
+            return None
+
+        try:
+            payload = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error("Invalid JSON in user profile for %s: %s", username, exc)
+            return None
+
+        user_obj = payload.get("user") or {}
+        stats_obj = user_obj.get("stats") or {}
+
+        def _to_int(value: object, default: int = 0) -> int:
+            try:
+                return int(value)  # type: ignore[arg-type]
+            except Exception:  # noqa: BLE001
+                return default
+
+        watchers = _to_int(stats_obj.get("watchers"), 0)
+        friends = _to_int(stats_obj.get("friends"), 0)
+        resolved_username = user_obj.get("username") or username
+        profile_url = payload.get("profile_url") or user_obj.get("profile_url")
+
+        self.logger.info(
+            "User watchers snapshot for %s on %s: watchers=%d, friends=%d",
+            resolved_username,
+            snapshot_date,
+            watchers,
+            friends,
+        )
+
+        try:
+            # user_id can be left None, we're keying by username
+            self.stats_repository.save_user_stats_snapshot(
+                user_id=None,
+                username=resolved_username,
+                snapshot_date=snapshot_date,
+                watchers=watchers,
+                friends=friends,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(
+                "Failed to persist user stats snapshot for %s: %s",
+                resolved_username,
+                exc,
+            )
+
+        # Fetch the latest snapshot to get watchers_diff calculated by the repository
+        latest_snapshot = self.stats_repository.get_latest_user_stats_snapshot(resolved_username)
+        if latest_snapshot:
+            # Return the complete snapshot including watchers_diff
+            return latest_snapshot
+
+        # Fallback if fetch failed (shouldn't happen normally)
+        return {
+            "username": resolved_username,
+            "snapshot_date": snapshot_date,
+            "watchers": watchers,
+            "friends": friends,
+            "profile_url": profile_url,
+            "watchers_diff": 0,
+        }
+
     def sync_gallery(
         self,
         access_token: str,
@@ -404,6 +503,10 @@ class StatsService:
             username or "-",
             include_deviations,
         )
+
+        # Snapshot user stats (watchers, friends) BEFORE fetching deviations
+        user_stats_snapshot = self._snapshot_user_stats(access_token, username, today)
+
         deviations = self._fetch_gallery_items(access_token, folderid, username=username)
 
         deviation_map: dict[str, dict] = {}
@@ -431,7 +534,7 @@ class StatsService:
 
         if not deviation_map:
             self.logger.info("No deviations found for folder %s; nothing to sync.", folderid)
-            return {"synced": 0, "date": today}
+            return {"synced": 0, "date": today, "user_stats": user_stats_snapshot}
 
         keys = list(deviation_map.keys())
         metadata = self._fetch_metadata(access_token, keys)
@@ -550,7 +653,11 @@ class StatsService:
             folderid,
             len(deviation_map),
         )
-        return {"synced": len(deviation_map), "date": today}
+        return {
+            "synced": len(deviation_map),
+            "date": today,
+            "user_stats": user_stats_snapshot,
+        }
 
     def get_stats_with_diff(self) -> list[dict]:
         """Return current stats with deltas vs yesterday."""
