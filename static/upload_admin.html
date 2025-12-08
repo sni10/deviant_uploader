@@ -41,6 +41,24 @@
     </style>
 </head>
 <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-3">
+        <div class="container py-4">
+            <a class="navbar-brand" href="/static/stats.html">DeviantArt Dashboard</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navMain">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/stats.html">Stats</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="/static/upload_admin.html">Upload Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
     <div class="container py-4">
         <div class="mb-3">
             <h1 class="h3 mb-1">DeviantArt Upload Admin</h1>
@@ -85,7 +103,7 @@
 
                         <div class="mb-3">
                             <label class="form-label small">Tags (comma-separated)</label>
-                            <input type="text" id="tags" class="form-control form-control-sm" placeholder="digital art, ai generated, fantasy">
+                            <textarea id="tags" class="form-control form-control-sm" placeholder="digital art, ai generated, fantasy" rows="3"></textarea>
                         </div>
 
                         <div class="mb-3">
