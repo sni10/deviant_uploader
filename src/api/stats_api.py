@@ -382,6 +382,40 @@ def create_app(config: Config = None) -> Flask:
             g.logger.error(f"Get drafts failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
+    @app.route('/api/admin/galleries', methods=['GET'])
+    def get_galleries_for_admin():
+        """
+        Get all galleries for dropdown selection.
+        
+        Returns:
+            JSON list of galleries
+        """
+        try:
+            (user_repo, token_repo, gallery_repo, deviation_repo,
+             deviation_stats_repo, stats_snapshot_repo, 
+             user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
+            galleries = gallery_repo.get_all_galleries()
+            
+            # Convert to JSON-serializable format
+            result = []
+            for gallery in galleries:
+                result.append({
+                    'id': gallery.gallery_db_id,
+                    'folderid': gallery.folderid,
+                    'name': gallery.name,
+                    'size': gallery.size,
+                    'parent': gallery.parent
+                })
+            
+            return jsonify({
+                'success': True,
+                'galleries': result,
+                'count': len(result)
+            })
+        except Exception as e:
+            g.logger.error(f"Get galleries failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
     @app.route('/api/admin/presets', methods=['GET'])
     def get_presets():
         """
@@ -587,6 +621,42 @@ def create_app(config: Config = None) -> Flask:
             g.logger.error(f"Publish failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
+    @app.route('/api/admin/upload', methods=['POST'])
+    def upload_selected():
+        """
+        Upload selected deviations (stash + publish in one operation).
+        
+        Expects JSON: {"deviation_ids": [1,2,3], "preset_id": X}
+        
+        Returns:
+            JSON with success/failed lists
+        """
+        try:
+            data = request.get_json()
+            deviation_ids = data.get('deviation_ids', [])
+            preset_id = data.get('preset_id')
+            
+            if not deviation_ids or not preset_id:
+                return jsonify({'success': False, 'error': 'deviation_ids and preset_id required'}), 400
+            
+            uploader_service, preset_repo, _ = get_upload_services()
+            
+            # Get preset
+            preset = preset_repo.get_preset_by_id(preset_id)
+            if not preset:
+                return jsonify({'success': False, 'error': 'Preset not found'}), 404
+            
+            # Perform combined upload (stash + publish)
+            results = uploader_service.batch_upload(deviation_ids, preset)
+            
+            return jsonify({
+                'success': True,
+                'results': results
+            })
+        except Exception as e:
+            g.logger.error(f"Upload failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
     @app.route('/api/admin/delete', methods=['POST'])
     def delete_selected():
         """
@@ -647,10 +717,11 @@ def create_app(config: Config = None) -> Flask:
             if not file_path.exists():
                 return jsonify({'error': 'File not found on disk'}), 404
             
-            # Serve the image file
+            # Serve the image file (ensure lowercase MIME type)
+            ext = file_path.suffix[1:].lower()
             return send_file(
                 str(file_path),
-                mimetype=f'image/{file_path.suffix[1:]}',
+                mimetype=f'image/{ext}',
                 as_attachment=False
             )
         except Exception as e:

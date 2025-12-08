@@ -405,10 +405,11 @@ def create_upload_admin_app():
             if not file_path.exists():
                 return jsonify({'error': 'File not found on disk'}), 404
             
-            # Serve the image file
+            # Serve the image file (ensure lowercase MIME type)
+            ext = file_path.suffix[1:].lower()
             return send_file(
                 str(file_path),
-                mimetype=f'image/{file_path.suffix[1:]}',
+                mimetype=f'image/{ext}',
                 as_attachment=False
             )
         except Exception as e:

@@ -13,41 +13,135 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
             padding: 20px;
+            color: #e0e0e0;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            overflow: hidden;
         }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
             text-align: center;
+            padding: 20px;
+            margin-bottom: 20px;
         }
 
         .header h1 {
             font-size: 2.5em;
+            color: #fff;
             margin-bottom: 10px;
         }
 
         .header p {
             font-size: 1.1em;
-            opacity: 0.9;
+            color: #a0a0a0;
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+        }
+
+        .sidebar {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            padding: 20px;
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .sidebar h2 {
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #c0c0c0;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #2a2a4a;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .form-group select {
+            cursor: pointer;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .section-title {
+            color: #667eea;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 20px 0 10px 0;
+            padding-top: 15px;
+            border-top: 1px solid #444;
+        }
+
+        .main-content {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            overflow: hidden;
         }
 
         .controls {
-            padding: 20px 30px;
-            background: #f8f9fa;
-            border-bottom: 2px solid #e9ecef;
+            padding: 15px 20px;
+            background: rgba(0,0,0,0.2);
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
@@ -66,7 +160,7 @@
 
         .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
 
         .btn:disabled {
@@ -85,38 +179,25 @@
             color: white;
         }
 
-        .btn-warning {
-            background: #ffc107;
-            color: #212529;
-        }
-
         .btn-danger {
             background: #dc3545;
             color: white;
         }
 
-        .btn-info {
-            background: #17a2b8;
-            color: white;
-        }
-
-        select {
-            padding: 10px 15px;
-            border: 2px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-            min-width: 200px;
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
         }
 
         .status-message {
             flex: 1;
             text-align: right;
             font-size: 14px;
-            color: #666;
+            color: #28a745;
         }
 
         .table-container {
-            padding: 30px;
+            padding: 20px;
             overflow-x: auto;
         }
 
@@ -126,76 +207,55 @@
         }
 
         thead {
-            background: #f8f9fa;
+            background: rgba(0,0,0,0.3);
         }
 
         th {
-            padding: 15px;
+            padding: 12px 15px;
             text-align: left;
             font-weight: 600;
-            color: #495057;
-            border-bottom: 2px solid #dee2e6;
+            color: #a0a0a0;
+            border-bottom: 2px solid #444;
+            font-size: 13px;
+            text-transform: uppercase;
         }
 
         td {
-            padding: 15px;
-            border-bottom: 1px solid #dee2e6;
+            padding: 12px 15px;
+            border-bottom: 1px solid #333;
         }
 
         tbody tr:hover {
-            background: #f8f9fa;
+            background: rgba(255,255,255,0.05);
         }
 
         .thumbnail {
-            width: 80px;
-            height: 80px;
+            width: 60px;
+            height: 60px;
             object-fit: cover;
             border-radius: 5px;
-            border: 2px solid #ddd;
+            border: 2px solid #444;
         }
 
         .status-badge {
             display: inline-block;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
         }
 
-        .status-draft {
-            background: #e9ecef;
-            color: #495057;
-        }
-
-        .status-stashing {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .status-stashed {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-
-        .status-publishing {
-            background: #cce5ff;
-            color: #004085;
-        }
-
-        .status-published {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-failed {
-            background: #f8d7da;
-            color: #721c24;
-        }
+        .status-draft { background: #444; color: #ccc; }
+        .status-stashing { background: #856404; color: #fff3cd; }
+        .status-stashed { background: #0c5460; color: #d1ecf1; }
+        .status-publishing { background: #004085; color: #cce5ff; }
+        .status-published { background: #155724; color: #d4edda; }
+        .status-failed { background: #721c24; color: #f8d7da; }
 
         .checkbox {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             cursor: pointer;
         }
 
@@ -205,20 +265,19 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: white;
+            background: #2a2a4a;
             padding: 30px;
             border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
             z-index: 1000;
             text-align: center;
+            color: #fff;
         }
 
-        .loading.active {
-            display: block;
-        }
+        .loading.active { display: block; }
 
         .spinner {
-            border: 4px solid #f3f3f3;
+            border: 4px solid #333;
             border-top: 4px solid #667eea;
             border-radius: 50%;
             width: 50px;
@@ -239,27 +298,45 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.7);
             z-index: 999;
         }
 
-        .overlay.active {
-            display: block;
-        }
+        .overlay.active { display: block; }
 
         .empty-state {
             text-align: center;
             padding: 60px 20px;
-            color: #6c757d;
+            color: #666;
         }
 
         .empty-state h2 {
-            font-size: 1.5em;
+            font-size: 1.3em;
             margin-bottom: 10px;
+            color: #888;
         }
 
-        .empty-state p {
-            font-size: 1.1em;
+        .preset-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .preset-actions .btn {
+            flex: 1;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .mature-options {
+            background: rgba(0,0,0,0.2);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .mature-options.hidden {
+            display: none;
         }
     </style>
 </head>
@@ -267,47 +344,170 @@
     <div class="container">
         <div class="header">
             <h1>🎨 DeviantArt Upload Admin</h1>
-            <p>Two-Stage Upload Manager: Draft → Stash → Publish</p>
+            <p>Upload Manager: Select files → Configure preset → Upload to DeviantArt</p>
         </div>
 
-        <div class="controls">
-            <button class="btn btn-primary" onclick="scanFiles()">📂 Scan Files</button>
-            
-            <select id="presetSelect" onchange="onPresetChange()">
-                <option value="">Select Preset...</option>
-            </select>
-            
-            <button class="btn btn-info" onclick="applyPreset()" id="applyPresetBtn" disabled>✨ Apply Preset</button>
-            <button class="btn btn-success" onclick="stashSelected()" id="stashBtn" disabled>📤 Stash Selected</button>
-            <button class="btn btn-warning" onclick="publishSelected()" id="publishBtn" disabled>🚀 Publish Selected</button>
-            <button class="btn btn-danger" onclick="deleteSelected()" id="deleteBtn" disabled>🗑️ Delete Selected</button>
-            
-            <div class="status-message" id="statusMessage"></div>
-        </div>
+        <div class="main-layout">
+            <!-- Sidebar: Preset Configuration -->
+            <div class="sidebar">
+                <h2>📋 Preset Configuration</h2>
+                
+                <div class="form-group">
+                    <label>Load Preset</label>
+                    <select id="presetSelect" onchange="onPresetChange()">
+                        <option value="">-- New Preset --</option>
+                    </select>
+                </div>
 
-        <div class="table-container">
-            <table id="deviationsTable">
-                <thead>
-                    <tr>
-                        <th>
-                            <input type="checkbox" class="checkbox" id="selectAll" onchange="toggleSelectAll()">
-                        </th>
-                        <th>Preview</th>
-                        <th>Filename</th>
-                        <th>Title</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="tableBody">
-                    <tr>
-                        <td colspan="6" class="empty-state">
-                            <h2>No files loaded</h2>
-                            <p>Click "Scan Files" to load images from the upload folder</p>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+                <div class="form-group">
+                    <label>Preset Name *</label>
+                    <input type="text" id="presetName" placeholder="My Upload Preset">
+                </div>
+
+                <div class="form-group">
+                    <label>Base Title *</label>
+                    <input type="text" id="baseTitle" placeholder="Artwork">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Start Number</label>
+                        <input type="number" id="titleIncrement" value="1" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Gallery</label>
+                        <select id="gallerySelect">
+                            <option value="">-- No Gallery --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="tags" placeholder="digital art, ai generated, fantasy">
+                </div>
+
+                <div class="form-group">
+                    <label>Artist Comments</label>
+                    <textarea id="artistComments" placeholder="Description for your artwork..."></textarea>
+                </div>
+
+                <div class="section-title">Display Settings</div>
+                
+                <div class="form-group">
+                    <label>Display Resolution</label>
+                    <select id="displayResolution">
+                        <option value="0">Original</option>
+                        <option value="1">400px</option>
+                        <option value="2">600px</option>
+                        <option value="3">800px</option>
+                        <option value="4">900px</option>
+                        <option value="5">1024px</option>
+                        <option value="6">1280px</option>
+                        <option value="7">1600px</option>
+                        <option value="8">1920px</option>
+                    </select>
+                </div>
+
+                <div class="section-title">Content Options</div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="isAiGenerated" checked>
+                    <label for="isAiGenerated">AI Generated</label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="feature" checked>
+                    <label for="feature">Feature in Browse</label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="allowComments" checked>
+                    <label for="allowComments">Allow Comments</label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="allowFreeDownload">
+                    <label for="allowFreeDownload">Allow Free Download</label>
+                </div>
+
+                <div class="section-title">Mature Content</div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="isMature" onchange="toggleMatureOptions()">
+                    <label for="isMature">Contains Mature Content</label>
+                </div>
+
+                <div class="mature-options hidden" id="matureOptions">
+                    <div class="form-group">
+                        <label>Mature Level</label>
+                        <select id="matureLevel">
+                            <option value="">None</option>
+                            <option value="moderate">Moderate</option>
+                            <option value="strict">Strict</option>
+                        </select>
+                    </div>
+                    
+                    <label style="font-size: 12px; color: #888; margin-bottom: 8px; display: block;">Classification:</label>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="matureNudity">
+                        <label for="matureNudity">Nudity</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="matureSexual">
+                        <label for="matureSexual">Sexual</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="matureGore">
+                        <label for="matureGore">Gore</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="matureLanguage">
+                        <label for="matureLanguage">Language</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="matureIdeology">
+                        <label for="matureIdeology">Ideology</label>
+                    </div>
+                </div>
+
+                <div class="preset-actions">
+                    <button class="btn btn-primary" onclick="savePreset()">💾 Save Preset</button>
+                </div>
+            </div>
+
+            <!-- Main Content: File Table -->
+            <div class="main-content">
+                <div class="controls">
+                    <button class="btn btn-primary" onclick="scanFiles()">📂 Scan Files</button>
+                    <button class="btn btn-success" onclick="uploadSelected()" id="uploadBtn" disabled>🚀 Upload Selected</button>
+                    <button class="btn btn-danger" onclick="deleteSelected()" id="deleteBtn" disabled>🗑️ Delete Selected</button>
+                    <div class="status-message" id="statusMessage"></div>
+                </div>
+
+                <div class="table-container">
+                    <table id="deviationsTable">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" class="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                                <th>Preview</th>
+                                <th>Filename</th>
+                                <th>Title</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            <tr>
+                                <td colspan="6" class="empty-state">
+                                    <h2>No files loaded</h2>
+                                    <p>Click "Scan Files" to load images from the upload folder</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -320,10 +520,12 @@
     <script>
         let deviations = [];
         let presets = [];
+        let galleries = [];
         let selectedPresetId = null;
 
         // Initialize
         window.onload = function() {
+            loadGalleries();
             loadPresets();
             loadDrafts();
         };
@@ -342,7 +544,34 @@
         function setStatus(message, type = 'info') {
             const statusEl = document.getElementById('statusMessage');
             statusEl.textContent = message;
-            statusEl.style.color = type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#666';
+            statusEl.style.color = type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#a0a0a0';
+        }
+
+        function toggleMatureOptions() {
+            const isMature = document.getElementById('isMature').checked;
+            document.getElementById('matureOptions').classList.toggle('hidden', !isMature);
+        }
+
+        async function loadGalleries() {
+            try {
+                const response = await fetch('/api/admin/galleries');
+                const data = await response.json();
+                
+                if (data.success) {
+                    galleries = data.galleries;
+                    const select = document.getElementById('gallerySelect');
+                    select.innerHTML = '<option value="">-- No Gallery --</option>';
+                    
+                    galleries.forEach(gallery => {
+                        const option = document.createElement('option');
+                        option.value = gallery.folderid;
+                        option.textContent = gallery.name + (gallery.size ? ` (${gallery.size})` : '');
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load galleries:', error);
+            }
         }
 
         async function loadPresets() {
@@ -353,24 +582,157 @@
                 if (data.success) {
                     presets = data.presets;
                     const select = document.getElementById('presetSelect');
+                    select.innerHTML = '<option value="">-- New Preset --</option>';
                     
-                    // Clear existing options except first
-                    select.innerHTML = '<option value="">Select Preset...</option>';
-                    
-                    // Add presets
                     presets.forEach(preset => {
                         const option = document.createElement('option');
                         option.value = preset.id;
-                        option.textContent = preset.name;
-                        if (preset.is_default) {
-                            option.textContent += ' (Default)';
-                        }
+                        option.textContent = preset.name + (preset.is_default ? ' (Default)' : '');
                         select.appendChild(option);
                     });
+
+                    // Auto-select default preset
+                    const defaultPreset = presets.find(p => p.is_default);
+                    if (defaultPreset) {
+                        select.value = defaultPreset.id;
+                        onPresetChange();
+                    }
                 }
             } catch (error) {
                 console.error('Failed to load presets:', error);
                 setStatus('Failed to load presets', 'error');
+            }
+        }
+
+        function onPresetChange() {
+            const select = document.getElementById('presetSelect');
+            selectedPresetId = select.value ? parseInt(select.value) : null;
+            
+            if (selectedPresetId) {
+                const preset = presets.find(p => p.id === selectedPresetId);
+                if (preset) {
+                    loadPresetToForm(preset);
+                }
+            } else {
+                clearForm();
+            }
+            updateButtonStates();
+        }
+
+        function loadPresetToForm(preset) {
+            document.getElementById('presetName').value = preset.name || '';
+            document.getElementById('baseTitle').value = preset.base_title || '';
+            document.getElementById('titleIncrement').value = preset.last_used_increment || preset.title_increment_start || 1;
+            document.getElementById('gallerySelect').value = preset.gallery_folderid || '';
+            document.getElementById('tags').value = Array.isArray(preset.tags) ? preset.tags.join(', ') : (preset.tags || '');
+            document.getElementById('artistComments').value = preset.artist_comments || '';
+            document.getElementById('displayResolution').value = preset.display_resolution || 0;
+            document.getElementById('isAiGenerated').checked = preset.is_ai_generated !== false;
+            document.getElementById('feature').checked = preset.feature !== false;
+            document.getElementById('allowComments').checked = preset.allow_comments !== false;
+            document.getElementById('allowFreeDownload').checked = preset.allow_free_download || false;
+            document.getElementById('isMature').checked = preset.is_mature || false;
+            
+            if (preset.is_mature) {
+                document.getElementById('matureLevel').value = preset.mature_level || '';
+                const classifications = preset.mature_classification || [];
+                document.getElementById('matureNudity').checked = classifications.includes('nudity');
+                document.getElementById('matureSexual').checked = classifications.includes('sexual');
+                document.getElementById('matureGore').checked = classifications.includes('gore');
+                document.getElementById('matureLanguage').checked = classifications.includes('language');
+                document.getElementById('matureIdeology').checked = classifications.includes('ideology');
+            }
+            
+            toggleMatureOptions();
+        }
+
+        function clearForm() {
+            document.getElementById('presetName').value = '';
+            document.getElementById('baseTitle').value = '';
+            document.getElementById('titleIncrement').value = 1;
+            document.getElementById('gallerySelect').value = '';
+            document.getElementById('tags').value = '';
+            document.getElementById('artistComments').value = '';
+            document.getElementById('displayResolution').value = 0;
+            document.getElementById('isAiGenerated').checked = true;
+            document.getElementById('feature').checked = true;
+            document.getElementById('allowComments').checked = true;
+            document.getElementById('allowFreeDownload').checked = false;
+            document.getElementById('isMature').checked = false;
+            document.getElementById('matureLevel').value = '';
+            document.getElementById('matureNudity').checked = false;
+            document.getElementById('matureSexual').checked = false;
+            document.getElementById('matureGore').checked = false;
+            document.getElementById('matureLanguage').checked = false;
+            document.getElementById('matureIdeology').checked = false;
+            toggleMatureOptions();
+        }
+
+        function getFormData() {
+            const tags = document.getElementById('tags').value
+                .split(',')
+                .map(t => t.trim())
+                .filter(t => t.length > 0);
+            
+            const matureClassification = [];
+            if (document.getElementById('matureNudity').checked) matureClassification.push('nudity');
+            if (document.getElementById('matureSexual').checked) matureClassification.push('sexual');
+            if (document.getElementById('matureGore').checked) matureClassification.push('gore');
+            if (document.getElementById('matureLanguage').checked) matureClassification.push('language');
+            if (document.getElementById('matureIdeology').checked) matureClassification.push('ideology');
+
+            return {
+                name: document.getElementById('presetName').value,
+                base_title: document.getElementById('baseTitle').value,
+                title_increment_start: parseInt(document.getElementById('titleIncrement').value) || 1,
+                gallery_folderid: document.getElementById('gallerySelect').value || null,
+                tags: tags,
+                artist_comments: document.getElementById('artistComments').value || null,
+                display_resolution: parseInt(document.getElementById('displayResolution').value) || 0,
+                is_ai_generated: document.getElementById('isAiGenerated').checked,
+                feature: document.getElementById('feature').checked,
+                allow_comments: document.getElementById('allowComments').checked,
+                allow_free_download: document.getElementById('allowFreeDownload').checked,
+                is_mature: document.getElementById('isMature').checked,
+                mature_level: document.getElementById('matureLevel').value || null,
+                mature_classification: matureClassification
+            };
+        }
+
+        async function savePreset() {
+            const formData = getFormData();
+            
+            if (!formData.name || !formData.base_title) {
+                setStatus('Preset Name and Base Title are required', 'error');
+                return;
+            }
+
+            showLoading('Saving preset...');
+            
+            try {
+                const response = await fetch('/api/admin/presets', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    setStatus('Preset saved successfully', 'success');
+                    await loadPresets();
+                    // Select the saved preset
+                    document.getElementById('presetSelect').value = data.preset_id;
+                    selectedPresetId = data.preset_id;
+                    updateButtonStates();
+                } else {
+                    setStatus('Save failed: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Save failed:', error);
+                setStatus('Save failed: ' + error.message, 'error');
+            } finally {
+                hideLoading();
             }
         }
 
@@ -394,9 +756,7 @@
             showLoading('Scanning upload folder...');
             
             try {
-                const response = await fetch('/api/admin/scan', {
-                    method: 'POST'
-                });
+                const response = await fetch('/api/admin/scan', { method: 'POST' });
                 const data = await response.json();
                 
                 if (data.success) {
@@ -422,7 +782,7 @@
                     <tr>
                         <td colspan="6" class="empty-state">
                             <h2>No files found</h2>
-                            <p>Upload folder is empty or all files have been processed</p>
+                            <p>Upload images to the upload folder and click "Scan Files"</p>
                         </td>
                     </tr>
                 `;
@@ -431,18 +791,12 @@
             
             tbody.innerHTML = deviations.map(dev => `
                 <tr>
-                    <td>
-                        <input type="checkbox" class="checkbox deviation-checkbox" data-id="${dev.id}" onchange="updateButtonStates()">
-                    </td>
-                    <td>
-                        <img src="/api/admin/thumbnail/${dev.id}" alt="${dev.filename}" class="thumbnail" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'">
-                    </td>
+                    <td><input type="checkbox" class="checkbox deviation-checkbox" data-id="${dev.id}" onchange="updateButtonStates()"></td>
+                    <td><img src="/api/admin/thumbnail/${dev.id}" alt="${dev.filename}" class="thumbnail" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22%3E%3Crect fill=%22%23333%22 width=%2260%22 height=%2260%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23666%22 font-size=%228%22%3ENo Image%3C/text%3E%3C/svg%3E'"></td>
                     <td>${dev.filename}</td>
                     <td>${dev.title || '-'}</td>
                     <td><span class="status-badge status-${dev.status}">${dev.status}</span></td>
-                    <td>
-                        <button class="btn btn-danger" style="padding: 5px 10px; font-size: 12px;" onclick="deleteSingle(${dev.id})">Delete</button>
-                    </td>
+                    <td><button class="btn btn-danger" style="padding: 5px 10px; font-size: 11px;" onclick="deleteSingle(${dev.id})">Delete</button></td>
                 </tr>
             `).join('');
             
@@ -451,115 +805,59 @@
 
         function toggleSelectAll() {
             const selectAll = document.getElementById('selectAll');
-            const checkboxes = document.querySelectorAll('.deviation-checkbox');
-            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            document.querySelectorAll('.deviation-checkbox').forEach(cb => cb.checked = selectAll.checked);
             updateButtonStates();
         }
 
         function updateButtonStates() {
             const selected = getSelectedIds();
             const hasSelection = selected.length > 0;
+            const hasPresetConfig = document.getElementById('presetName').value && document.getElementById('baseTitle').value;
             
-            document.getElementById('applyPresetBtn').disabled = !hasSelection || !selectedPresetId;
-            document.getElementById('stashBtn').disabled = !hasSelection || !selectedPresetId;
-            document.getElementById('publishBtn').disabled = !hasSelection;
+            document.getElementById('uploadBtn').disabled = !hasSelection || !hasPresetConfig;
             document.getElementById('deleteBtn').disabled = !hasSelection;
         }
 
-        function onPresetChange() {
-            const select = document.getElementById('presetSelect');
-            selectedPresetId = select.value ? parseInt(select.value) : null;
-            updateButtonStates();
-        }
-
         function getSelectedIds() {
-            const checkboxes = document.querySelectorAll('.deviation-checkbox:checked');
-            return Array.from(checkboxes).map(cb => parseInt(cb.dataset.id));
+            return Array.from(document.querySelectorAll('.deviation-checkbox:checked')).map(cb => parseInt(cb.dataset.id));
         }
 
-        async function applyPreset() {
-            const selectedIds = getSelectedIds();
-            if (selectedIds.length === 0 || !selectedPresetId) return;
-            
-            showLoading(`Applying preset to ${selectedIds.length} files...`);
-            
-            try {
-                const response = await fetch('/api/admin/apply-preset', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        preset_id: selectedPresetId,
-                        deviation_ids: selectedIds
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    await loadDrafts();
-                    setStatus(`Applied preset to ${data.count} files`, 'success');
-                } else {
-                    setStatus('Apply failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Apply failed:', error);
-                setStatus('Apply failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function stashSelected() {
-            const selectedIds = getSelectedIds();
-            if (selectedIds.length === 0 || !selectedPresetId) return;
-            
-            showLoading(`Stashing ${selectedIds.length} files... (This may take a while)`);
-            
-            try {
-                const response = await fetch('/api/admin/stash', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        deviation_ids: selectedIds,
-                        preset_id: selectedPresetId
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    const results = data.results;
-                    const successCount = results.success.length;
-                    const failCount = results.failed.length;
-                    
-                    await loadDrafts();
-                    setStatus(`Stashed: ${successCount} success, ${failCount} failed`, successCount > 0 ? 'success' : 'error');
-                } else {
-                    setStatus('Stash failed: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('Stash failed:', error);
-                setStatus('Stash failed: ' + error.message, 'error');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function publishSelected() {
+        async function uploadSelected() {
             const selectedIds = getSelectedIds();
             if (selectedIds.length === 0) return;
-            
-            if (!confirm(`Publish ${selectedIds.length} deviations? Files will be deleted after successful publish.`)) {
+
+            // First save or get the preset
+            const formData = getFormData();
+            if (!formData.name || !formData.base_title) {
+                setStatus('Please fill in Preset Name and Base Title', 'error');
                 return;
             }
-            
-            showLoading(`Publishing ${selectedIds.length} files... (This may take a while)`);
+
+            showLoading(`Uploading ${selectedIds.length} files to DeviantArt...`);
             
             try {
-                const response = await fetch('/api/admin/publish', {
+                // Save preset first to ensure we have latest settings
+                const presetResponse = await fetch('/api/admin/presets', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(formData)
+                });
+                const presetData = await presetResponse.json();
+                
+                if (!presetData.success) {
+                    setStatus('Failed to save preset: ' + presetData.error, 'error');
+                    hideLoading();
+                    return;
+                }
+
+                const presetId = presetData.preset_id;
+
+                // Now perform the upload
+                const response = await fetch('/api/admin/upload', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
+                        preset_id: presetId,
                         deviation_ids: selectedIds
                     })
                 });
@@ -568,17 +866,23 @@
                 
                 if (data.success) {
                     const results = data.results;
-                    const successCount = results.success.length;
-                    const failCount = results.failed.length;
+                    const successCount = results.success ? results.success.length : 0;
+                    const failedCount = results.failed ? results.failed.length : 0;
                     
                     await loadDrafts();
-                    setStatus(`Published: ${successCount} success, ${failCount} failed`, successCount > 0 ? 'success' : 'error');
+                    await loadPresets(); // Refresh to get updated increment
+                    
+                    if (failedCount === 0) {
+                        setStatus(`Successfully uploaded ${successCount} files!`, 'success');
+                    } else {
+                        setStatus(`Uploaded ${successCount}, failed ${failedCount}`, failedCount > 0 ? 'error' : 'success');
+                    }
                 } else {
-                    setStatus('Publish failed: ' + data.error, 'error');
+                    setStatus('Upload failed: ' + data.error, 'error');
                 }
             } catch (error) {
-                console.error('Publish failed:', error);
-                setStatus('Publish failed: ' + error.message, 'error');
+                console.error('Upload failed:', error);
+                setStatus('Upload failed: ' + error.message, 'error');
             } finally {
                 hideLoading();
             }
@@ -588,9 +892,7 @@
             const selectedIds = getSelectedIds();
             if (selectedIds.length === 0) return;
             
-            if (!confirm(`Delete ${selectedIds.length} deviations and their files? This cannot be undone.`)) {
-                return;
-            }
+            if (!confirm(`Delete ${selectedIds.length} selected files and their database records?`)) return;
             
             showLoading(`Deleting ${selectedIds.length} files...`);
             
@@ -598,9 +900,7 @@
                 const response = await fetch('/api/admin/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        deviation_ids: selectedIds
-                    })
+                    body: JSON.stringify({ deviation_ids: selectedIds })
                 });
                 
                 const data = await response.json();
@@ -620,9 +920,7 @@
         }
 
         async function deleteSingle(id) {
-            if (!confirm('Delete this deviation and file? This cannot be undone.')) {
-                return;
-            }
+            if (!confirm('Delete this file and its database record?')) return;
             
             showLoading('Deleting...');
             
@@ -630,9 +928,7 @@
                 const response = await fetch('/api/admin/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        deviation_ids: [id]
-                    })
+                    body: JSON.stringify({ deviation_ids: [id] })
                 });
                 
                 const data = await response.json();
