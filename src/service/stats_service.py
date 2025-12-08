@@ -506,7 +506,6 @@ class StatsService:
         access_token: str,
         folderid: str,
         username: Optional[str] = None,
-        include_deviations: bool = False,
     ) -> dict:
         """Fetch gallery deviations, pull stats, persist current and snapshot.
 
@@ -514,16 +513,13 @@ class StatsService:
             access_token: OAuth2 access token.
             folderid: DeviantArt gallery folder identifier.
             username: Optional DeviantArt username (for shared galleries).
-            include_deviations: If True, also fetch /deviation/{id} details and
-            enrich the local deviations table (heavier, more API calls).
         """
 
         today = date.today().isoformat()
         self.logger.info(
-            "Starting stats sync for folder %s (username=%s, include_deviations=%s)",
+            "Starting stats sync for folder %s (username=%s)",
             folderid,
             username or "-",
-            include_deviations,
         )
 
         # Snapshot user stats (watchers, friends) BEFORE fetching deviations
@@ -560,17 +556,12 @@ class StatsService:
 
         keys = list(deviation_map.keys())
         metadata = self._fetch_metadata(access_token, keys)
-        deviation_details: dict[str, dict]
-        if include_deviations:
-            deviation_details = self._fetch_deviation_details(access_token, keys)
-        else:
-            deviation_details = {}
+
         for meta in metadata:
             deviationid = meta.get("deviationid")
             stats = meta.get("stats", {}) if meta else {}
             submission = meta.get("submission") or {}
             basic = deviation_map.get(deviationid, {})
-            details = deviation_details.get(deviationid, {}) if include_deviations else {}
             if meta is not None:
                 is_mature = bool(
                     meta.get("is_mature")
@@ -610,28 +601,6 @@ class StatsService:
                 favourites=stats.get("favourites", 0),
                 comments=stats.get("comments", 0),
             )
-
-            # Optionally enrich the deviations table with publication time from
-            # /deviation/{deviationid}. This may be expensive, so it is only
-            # executed when explicitly requested by the caller.
-            if include_deviations:
-                published_time = details.get("published_time") if details else None
-                if published_time is not None:
-                    try:
-                        self.deviation_repository.update_published_time_by_deviationid(
-                            deviationid, published_time
-                        )
-                        self.logger.info(
-                            "Updated deviation %s published_time to %s",
-                            deviationid,
-                            published_time,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        self.logger.error(
-                            "Failed to update published_time for deviation %s: %s",
-                            deviationid,
-                            exc,
-                        )
 
             self.deviation_metadata_repo.save_metadata(
                 deviationid=deviationid,

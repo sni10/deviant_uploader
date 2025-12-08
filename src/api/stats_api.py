@@ -208,7 +208,6 @@ def create_app(config: Config = None) -> Flask:
             payload = request.get_json(silent=True) or {}
             folderid = (payload.get("folderid") or "").strip()
             username = payload.get("username")
-            include_deviations = bool(payload.get("include_deviations"))
 
             if not folderid:
                 return jsonify({"success": False, "error": "folderid is required"}), 400
@@ -227,7 +226,6 @@ def create_app(config: Config = None) -> Flask:
                 access_token,
                 folderid,
                 username=username,
-                include_deviations=include_deviations,
             )
             return jsonify({"success": True, "data": result})
         except Exception as exc:  # noqa: BLE001 (surface error to caller)
