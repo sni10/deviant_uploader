@@ -375,37 +375,41 @@ class UploaderService:
         Returns:
             True if publish successful, False otherwise
         """
-        # Build publish parameters
-        params = {
-            'access_token': access_token,
-            'itemid': deviation.itemid,
-            'is_mature': 1 if deviation.is_mature else 0,
-            'feature': 1 if deviation.feature else 0,
-            'allow_comments': 1 if deviation.allow_comments else 0,
-            'display_resolution': deviation.display_resolution,
-            'allow_free_download': 1 if deviation.allow_free_download else 0,
-            'is_ai_generated': 1 if deviation.is_ai_generated else 0,
-            'noai': 1 if deviation.noai else 0
-        }
-        
-        # Add optional parameters
-        if deviation.mature_level:
-            params['mature_level'] = deviation.mature_level
-        
-        if deviation.mature_classification:
-            params['mature_classification'] = deviation.mature_classification
-        
+        # Build publish parameters as list of tuples to encode arrays properly
+        # DeviantArt expects repeated keys for arrays, e.g., tags[]=a&tags[]=b
+        itemid_value = int(deviation.itemid) if isinstance(deviation.itemid, (int, str)) and str(deviation.itemid).isdigit() else deviation.itemid
+        params: list[tuple[str, object]] = [
+            ('access_token', access_token),
+            ('itemid', itemid_value),
+            ('is_mature', 1 if deviation.is_mature else 0),
+            ('feature', 1 if deviation.feature else 0),
+            ('allow_comments', 1 if deviation.allow_comments else 0),
+            ('display_resolution', deviation.display_resolution),
+            ('allow_free_download', 1 if deviation.allow_free_download else 0),
+            ('is_ai_generated', 1 if deviation.is_ai_generated else 0),
+            ('noai', 1 if deviation.noai else 0),
+        ]
+
+        # Add optional parameters (respecting is_mature rules)
+        if deviation.is_mature and deviation.mature_level:
+            params.append(('mature_level', deviation.mature_level))
+
+        if deviation.is_mature and deviation.mature_classification:
+            for classification in deviation.mature_classification:
+                params.append(('mature_classification[]', classification))
+
         if deviation.tags:
-            params['tags'] = deviation.tags
-        
+            for tag in deviation.tags:
+                params.append(('tags[]', tag))
+
         if deviation.add_watermark and deviation.display_resolution > 0:
-            params['add_watermark'] = 1
-        
+            params.append(('add_watermark', 1))
+
         # Resolve gallery UUID from database if gallery_id is set
         if deviation.gallery_id:
             gallery = self.gallery_repository.get_gallery_by_id(deviation.gallery_id)
-            if gallery:
-                params['galleryids'] = [gallery.folderid]
+            if gallery and gallery.folderid:
+                params.append(('galleryids[]', gallery.folderid))
                 self.logger.info(f"Publishing to gallery: {gallery.name} (UUID: {gallery.folderid})")
             else:
                 self.logger.warning(f"Gallery with ID {deviation.gallery_id} not found in database")
@@ -414,9 +418,17 @@ class UploaderService:
             self.logger.info(f"Publishing deviation with itemid={deviation.itemid}")
             response = requests.post(
                 self.config.api_stash_publish_url,
-                data=params
+                data=params,
+                timeout=60,
             )
-            response.raise_for_status()
+            # Do not raise yet; we want to log error body on non-200
+            if not response.ok:
+                try:
+                    body = response.text[:500]
+                except Exception:
+                    body = '<no body>'
+                self.logger.error(f"Publish HTTP error {response.status_code}: {body}")
+                response.raise_for_status()
             
             result = response.json()
             
@@ -432,7 +444,14 @@ class UploaderService:
                 return False
                 
         except requests.RequestException as e:
-            error_msg = f"Request failed: {str(e)}"
+            # Try to include server-provided error body for diagnostics
+            resp_text = ''
+            try:
+                if 'response' in e.__dict__ and e.response is not None:
+                    resp_text = f" | body={e.response.text[:500]}"
+            except Exception:
+                resp_text = ''
+            error_msg = f"Request failed: {str(e)}{resp_text}"
             deviation.error = error_msg
             self.logger.error(error_msg)
             return False
@@ -785,14 +804,13 @@ class UploaderService:
                 
                 # Perform stash upload
                 self.logger.info(f"[{idx}/{len(deviation_ids)}] Stashing {deviation.filename}")
-                itemid = self.upload_to_stash(deviation, access_token)
+                stash_ok = self.upload_to_stash(deviation, access_token)
                 
-                if itemid:
-                    deviation.itemid = itemid
+                if stash_ok and deviation.itemid:
                     deviation.status = UploadStatus.STASHED
                     self.deviation_repository.update_deviation(deviation)
                     results["success"].append(dev_id)
-                    self.logger.info(f"Successfully stashed {deviation.filename} (itemid: {itemid})")
+                    self.logger.info(f"Successfully stashed {deviation.filename} (itemid: {deviation.itemid})")
                 else:
                     deviation.status = UploadStatus.FAILED
                     deviation.error = "Stash upload failed"
@@ -949,9 +967,9 @@ class UploaderService:
                 self.deviation_repository.update_deviation(deviation)
                 
                 self.logger.info(f"[{idx}/{len(deviation_ids)}] Stashing {deviation.filename}")
-                itemid = self.upload_to_stash(deviation, access_token)
+                stash_ok = self.upload_to_stash(deviation, access_token)
                 
-                if not itemid:
+                if not (stash_ok and deviation.itemid):
                     deviation.status = UploadStatus.FAILED
                     deviation.error = "Stash upload failed"
                     self.deviation_repository.update_deviation(deviation)
@@ -959,10 +977,9 @@ class UploaderService:
                     self.logger.error(f"Failed to stash {deviation.filename}")
                     continue
                 
-                deviation.itemid = itemid
                 deviation.status = UploadStatus.STASHED
                 self.deviation_repository.update_deviation(deviation)
-                self.logger.info(f"Successfully stashed {deviation.filename} (itemid: {itemid})")
+                self.logger.info(f"Successfully stashed {deviation.filename} (itemid: {deviation.itemid})")
                 
                 # Step 2: Publish immediately after stash
                 deviation.status = UploadStatus.PUBLISHING
