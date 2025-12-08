@@ -14,6 +14,7 @@ Simple synchronous Python app for uploading images to DeviantArt via the OAuth2 
 
 ## Features
 
+### Core Functions
 - **OAuth2 authentication**: automatic token handling with refresh
 - **Token validation**: uses DeviantArt placebo endpoint
 - **Automatic token refresh**: renews expired tokens
@@ -21,13 +22,23 @@ Simple synchronous Python app for uploading images to DeviantArt via the OAuth2 
 - **Template-based uploads**: configure upload parameters via JSON template
 - **Image upload**: publish via stash/publish endpoint
 - **Gallery assignment**: publish to selected galleries automatically
-- **DB tracking**: SQLite database tracks uploads and galleries
+- **DB tracking**: SQLite/PostgreSQL database tracks uploads and galleries
 - **File handling**: moves successful uploads to the `done` folder
-- **Metadata files**: per-image JSON overrides
 - **Logging**: detailed logs with rotation
 - **Configuration**: environment-driven settings
 - **Recovery**: restores stuck uploads after failures
-- **Stats dashboard**: Flask web UI and API showing current deviation stats, daily snapshots, watcher history, and extended metadata.
+
+### Web Interfaces
+- **Stats Dashboard**: web dashboard for viewing current deviation stats, daily snapshots, and watcher history with auto-sync across all galleries
+- **Charts Dashboard**: interactive charts and statistics visualization with deviation filtering and time period selection
+- **Upload Admin Interface**: full-featured web interface for batch upload management with drag-and-drop support
+
+### Advanced Features
+- **Upload Presets**: savable presets system for quick upload configuration (tags, galleries, mature flags, etc.)
+- **Batch Operations**: batch stash, publish, and delete deviations through web interface
+- **Rate Limiting**: automatic DeviantArt API rate limit handling with exponential backoff
+- **Database Abstraction**: SQLite and PostgreSQL support through unified interface
+- **Responsive UI**: Bootstrap 5 adaptive interface for any device
 
 ## Architecture
 
@@ -252,34 +263,89 @@ uploader.upload_single(
 token_repo.close()
 ```
 
-### DeviantArt stats dashboard
+### DeviantArt Manager Web Interface
 
-Web dashboard and REST API for current metrics and watcher history.
+The app provides three web interfaces for managing your DeviantArt content.
 
-- Shows views, favourites, comments for deviations in a gallery
-- Daily deltas for views/favs/comments
-- Extended metadata (thumb, title, publication date)
-- Header displays watcher count and daily delta
-
-**Run the dashboard:**
-
-1. Ensure base setup is done (`.env`, `python main.py`, `python fetch_user.py`, `python fetch_galleries.py`).
-2. Flask is already in `requirements.txt`.
-3. Start the server:
+**Start the web server:**
+1. Ensure base setup is done (`.env`, `python fetch_user.py`, `python fetch_galleries.py`)
+2. Start the unified server:
 
 ```bash
 python run_stats.py
 ```
 
-4. Open `http://localhost:5000` (serves `static/stats.html`).
+3. Open `http://localhost:5000` in your browser
+
+Three interfaces are available with a responsive navbar for switching between them.
+
+#### Stats Dashboard (`http://localhost:5000/`)
+
+Dashboard for viewing and syncing statistics of your deviations.
+
+**Features:**
+- View current views, favourites, and comments for all deviations
+- Daily deltas (growth/decline) for each metric
+- Thumbnails, titles, publication dates, mature flags
+- Display user watcher count and daily change
+- **Automatic sync across all galleries** - Sync button iterates through all galleries with 3-second intervals
+- Sort by any column (views, favourites, comments, publication date)
+- Combined Score (views + favourites × 10) for quick popularity assessment
 
 **API endpoints:**
-- `GET /api/stats` – current stats with daily deltas
-- `POST /api/stats/sync` – force sync for a gallery
-- `GET /api/options` – users and galleries for dropdowns
-- `GET /api/user_stats/latest?username=...` – latest watcher snapshot
+- `GET /api/stats` — current stats with daily deltas
+- `POST /api/stats/sync` — sync stats for a gallery
+- `GET /api/options` — users and galleries list
+- `GET /api/user_stats/latest?username=...` — latest watcher snapshot
 
-Sync uses `AuthService` and `StatsService` with exponential backoff on DeviantArt rate limits (`429 user_api_threshold`).
+#### Charts Dashboard (`http://localhost:5000/charts.html`)
+
+Interactive charts and statistics visualization.
+
+**Features:**
+- Visualize aggregated statistics (views, favourites, comments) for selected period
+- Filter by specific deviations (select from list with thumbnails)
+- Flexible time periods (7, 14, 30 days)
+- User watcher history with change graphs
+- Interactive Chart.js charts with zoom capabilities
+
+**API endpoints:**
+- `GET /api/charts/deviations` — list of all deviations for filtering
+- `GET /api/charts/aggregated?period=7&deviation_ids=...` — aggregated stats
+- `GET /api/charts/user-watchers?username=...&period=7` — watcher history
+
+#### Upload Admin Interface (`http://localhost:5000/upload_admin.html`)
+
+Full-featured web interface for batch upload management to DeviantArt.
+
+**Features:**
+- Scan `upload/` folder and display files with thumbnails
+- **Upload Presets** - create and manage presets with settings (tags, galleries, mature flags, artist comments)
+- Apply presets to selected deviations with one click
+- **Batch Operations:**
+  - Stash - batch upload files to DeviantArt Stash
+  - Publish - batch publish stash items
+  - Upload - combined operation (stash + publish)
+  - Delete - delete files and database records
+- Filter by status (new, stashed, published)
+- Display upload statuses with icons and colors
+- Responsive design for tablets and desktops
+
+**API endpoints:**
+- `POST /api/admin/scan` — scan upload folder
+- `GET /api/admin/drafts` — get all deviations from DB
+- `GET /api/admin/galleries` — galleries list
+- `GET /api/admin/presets` — presets list
+- `POST /api/admin/presets` — save preset
+- `POST /api/admin/apply-preset` — apply preset to deviations
+- `POST /api/admin/stash` — batch upload to stash
+- `POST /api/admin/publish` — batch publish
+- `POST /api/admin/upload` — combined upload (stash+publish)
+- `POST /api/admin/delete` — delete files and records
+- `GET /api/admin/thumbnail/<id>` — deviation thumbnail
+
+**Rate Limiting:**
+All sync operations respect DeviantArt API rate limits. On `429 user_api_threshold` response, the service performs multiple attempts with exponential backoff and safely stops the current run without blocking the token.
 
 ## Configuration
 
