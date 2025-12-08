@@ -208,7 +208,6 @@ def create_app(config: Config = None) -> Flask:
             payload = request.get_json(silent=True) or {}
             folderid = (payload.get("folderid") or "").strip()
             username = payload.get("username")
-            include_deviations = bool(payload.get("include_deviations"))
 
             if not folderid:
                 return jsonify({"success": False, "error": "folderid is required"}), 400
@@ -227,7 +226,6 @@ def create_app(config: Config = None) -> Flask:
                 access_token,
                 folderid,
                 username=username,
-                include_deviations=include_deviations,
             )
             return jsonify({"success": True, "data": result})
         except Exception as exc:  # noqa: BLE001 (surface error to caller)
@@ -294,6 +292,74 @@ def create_app(config: Config = None) -> Flask:
     def serve_static(filename: str):
         """Serve other static assets if needed."""
         return send_from_directory(STATIC_DIR, filename)
+
+    # ========== CHARTS API ROUTES ==========
+
+    @app.route('/charts.html')
+    def charts_page():
+        """Serve charts visualization page."""
+        return send_from_directory(STATIC_DIR, "charts.html")
+
+    @app.route("/api/charts/deviations", methods=["GET"])
+    def get_deviations_for_charts():
+        """Return list of all deviations for chart filtering."""
+        try:
+            auth_service, stats_service = get_services()
+            deviations = stats_service.get_deviations_list()
+            return jsonify({"success": True, "data": deviations})
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to fetch deviations list", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/charts/aggregated", methods=["GET"])
+    def get_aggregated_chart_data():
+        """Return aggregated stats for charts.
+
+        Query params:
+            period: Number of days (default: 7)
+            deviation_ids: Comma-separated deviation IDs (optional)
+        """
+        try:
+            period_days = int(request.args.get("period", 7))
+            deviation_ids_param = request.args.get("deviation_ids", "")
+
+            # Parse deviation IDs from comma-separated string
+            deviation_ids = None
+            if deviation_ids_param and deviation_ids_param.strip():
+                deviation_ids = [
+                    did.strip()
+                    for did in deviation_ids_param.split(",")
+                    if did.strip()
+                ]
+
+            auth_service, stats_service = get_services()
+            data = stats_service.get_aggregated_stats(period_days, deviation_ids)
+            return jsonify({"success": True, "data": data})
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to fetch aggregated chart data", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/charts/user-watchers", methods=["GET"])
+    def get_user_watchers_chart_data():
+        """Return user watchers history for charts.
+
+        Query params:
+            username: DeviantArt username (required)
+            period: Number of days (default: 7)
+        """
+        try:
+            username = request.args.get("username", "").strip()
+            if not username:
+                return jsonify({"success": False, "error": "username is required"}), 400
+
+            period_days = int(request.args.get("period", 7))
+
+            auth_service, stats_service = get_services()
+            data = stats_service.get_user_watchers_history(username, period_days)
+            return jsonify({"success": True, "data": data})
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to fetch user watchers chart data", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
 
     # ========== UPLOAD ADMIN ROUTES ==========
     

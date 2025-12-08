@@ -65,35 +65,67 @@
   }
 
   async function syncStats() {
-    const folderid = document.getElementById("gallery-select").value;
     const username = document.getElementById("user-select").value;
-    const includeCheckbox = document.getElementById("include-deviations");
-    const includeDeviations = includeCheckbox && includeCheckbox.checked;
-    if (!folderid) {
-      setStatus("Please select a gallery", "error");
+    const galleries = optionsCache.galleries || [];
+
+    if (galleries.length === 0) {
+      setStatus("No galleries available to sync", "error");
       return;
     }
-    setStatus("Syncing...");
-    try {
-      const resp = await fetch("/api/stats/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folderid,
-          username: username || undefined,
-          include_deviations: includeDeviations,
-        }),
-      });
-      const json = await resp.json();
-      if (!json.success) throw new Error(json.error || "Unknown error");
 
-      const userStats = json.data.user_stats;
-      if (userStats && userStats.username) {
+    setStatus(`Syncing ${galleries.length} galleries...`);
+
+    let syncedCount = 0;
+    let errorCount = 0;
+    let lastUserStats = null;
+
+    try {
+      for (let i = 0; i < galleries.length; i++) {
+        const gallery = galleries[i];
+        const folderid = gallery.folderid;
+
+        setStatus(`Syncing gallery ${i + 1}/${galleries.length}: ${gallery.name}...`);
+
+        try {
+          const resp = await fetch("/api/stats/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              folderid,
+              username: username || undefined,
+            }),
+          });
+          const json = await resp.json();
+
+          if (!json.success) {
+            throw new Error(json.error || "Unknown error");
+          }
+
+          syncedCount++;
+
+          // Update user stats from last successful sync
+          if (json.data.user_stats) {
+            lastUserStats = json.data.user_stats;
+          }
+
+        } catch (e) {
+          console.error(`Failed to sync gallery ${gallery.name}:`, e);
+          errorCount++;
+        }
+
+        // Wait 3 seconds before next gallery (except for last one)
+        if (i < galleries.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+      }
+
+      // Update user header with last stats
+      if (lastUserStats && lastUserStats.username) {
         const headerEl = document.getElementById("user-header");
-        const watchers = userStats.watchers ?? 0;
-        const watchersDiff = userStats.watchers_diff ?? 0;
+        const watchers = lastUserStats.watchers ?? 0;
+        const watchersDiff = lastUserStats.watchers_diff ?? 0;
         const profileUrl =
-          userStats.profile_url || `https://www.deviantart.com/${userStats.username}`;
+          lastUserStats.profile_url || `https://www.deviantart.com/${lastUserStats.username}`;
 
         let diffHtml = "";
         if (watchersDiff > 0) {
@@ -105,7 +137,11 @@
         headerEl.innerHTML = `&mdash; <a href="${profileUrl}" target="_blank" rel="noopener">watchers: ${watchers}</a>${diffHtml}`;
       }
 
-      setStatus(`Synced ${json.data.synced} deviations for ${json.data.date}`, "success");
+      const statusMsg = errorCount > 0
+        ? `Synced ${syncedCount}/${galleries.length} galleries (${errorCount} failed)`
+        : `Successfully synced all ${syncedCount} galleries`;
+      setStatus(statusMsg, errorCount > 0 ? "error" : "success");
+
       await loadStats();
     } catch (e) {
       setStatus("Error: " + e.message, "error");
@@ -123,10 +159,6 @@
       populateSelect("user-select", optionsCache.users, (u) => ({
         value: u.username,
         label: `${u.username}`,
-      }));
-      populateSelect("gallery-select", optionsCache.galleries, (g) => ({
-        value: g.folderid,
-        label: `${g.name} (${g.folderid})`,
       }));
 
       setStatus("Options loaded", "success");
