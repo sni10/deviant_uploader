@@ -88,7 +88,21 @@ class DeviationRepository(BaseRepository):
         self.conn.execute(
             """
             UPDATE deviations SET
+                title = ?,
                 status = ?,
+                is_mature = ?,
+                mature_level = ?,
+                mature_classification = ?,
+                feature = ?,
+                allow_comments = ?,
+                display_resolution = ?,
+                tags = ?,
+                allow_free_download = ?,
+                add_watermark = ?,
+                is_ai_generated = ?,
+                noai = ?,
+                artist_comments = ?,
+                is_dirty = ?,
                 itemid = ?,
                 gallery_id = ?,
                 deviationid = ?,
@@ -98,7 +112,23 @@ class DeviationRepository(BaseRepository):
             WHERE id = ?
             """,
             (
+                deviation.title,
                 deviation.status.value,
+                1 if deviation.is_mature else 0,
+                deviation.mature_level,
+                json.dumps(deviation.mature_classification)
+                if deviation.mature_classification
+                else None,
+                1 if deviation.feature else 0,
+                1 if deviation.allow_comments else 0,
+                deviation.display_resolution,
+                json.dumps(deviation.tags) if deviation.tags else None,
+                1 if deviation.allow_free_download else 0,
+                1 if deviation.add_watermark else 0,
+                1 if deviation.is_ai_generated else 0,
+                1 if deviation.noai else 0,
+                deviation.artist_comments,
+                1 if deviation.is_dirty else 0,
                 deviation.itemid,
                 deviation.gallery_id,
                 deviation.deviationid,
@@ -257,6 +287,19 @@ class DeviationRepository(BaseRepository):
         Returns:
             Deviation object
         """
+        # Parse JSON fields - handle None, empty strings, and invalid JSON
+        mature_class_str = (row[7] or "").strip()
+        try:
+            mature_classification = json.loads(mature_class_str) if mature_class_str else []
+        except json.JSONDecodeError:
+            mature_classification = []
+        
+        tags_str = (row[11] or "").strip()
+        try:
+            tags = json.loads(tags_str) if tags_str else []
+        except json.JSONDecodeError:
+            tags = []
+        
         return Deviation(
             filename=row[1],
             title=row[2],
@@ -264,11 +307,11 @@ class DeviationRepository(BaseRepository):
             status=UploadStatus(row[4]),
             is_mature=bool(row[5]),
             mature_level=row[6],
-            mature_classification=json.loads(row[7]) if row[7] else [],
+            mature_classification=mature_classification,
             feature=bool(row[8]),
             allow_comments=bool(row[9]),
             display_resolution=row[10],
-            tags=json.loads(row[11]) if row[11] else [],
+            tags=tags,
             allow_free_download=bool(row[12]),
             add_watermark=bool(row[13]),
             is_ai_generated=bool(row[14]),

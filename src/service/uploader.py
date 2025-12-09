@@ -392,9 +392,11 @@ class UploaderService:
 
         # Add optional parameters (respecting is_mature rules)
         if deviation.is_mature and deviation.mature_level:
+            self.logger.info(f"Adding mature_level: {repr(deviation.mature_level)} (type: {type(deviation.mature_level)})")
             params.append(('mature_level', deviation.mature_level))
 
         if deviation.is_mature and deviation.mature_classification:
+            self.logger.info(f"Adding mature_classification: {repr(deviation.mature_classification)} (type: {type(deviation.mature_classification)})")
             for classification in deviation.mature_classification:
                 params.append(('mature_classification[]', classification))
 
@@ -876,13 +878,13 @@ class UploaderService:
                 # Perform publish
                 self.logger.info(f"[{idx}/{len(deviation_ids)}] Publishing {deviation.filename}")
                 success = self._publish_deviation(deviation, access_token)
-                
+
                 if success:
                     deviation.status = UploadStatus.PUBLISHED
                     self.deviation_repository.update_deviation(deviation)
                     results["success"].append(dev_id)
                     self.logger.info(f"Successfully published {deviation.filename}")
-                    
+
                     # Delete file after successful publish
                     if deviation.file_path:
                         try:
@@ -892,6 +894,13 @@ class UploaderService:
                                 self.logger.info(f"Deleted file {deviation.file_path}")
                         except Exception as e:
                             self.logger.warning(f"Failed to delete file {deviation.file_path}: {e}")
+
+                    # Delete deviation record from database after successful upload
+                    try:
+                        self.deviation_repository.delete_deviation(dev_id)
+                        self.logger.info(f"Deleted deviation record {dev_id} from database")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to delete deviation record {dev_id} from database: {e}")
                 else:
                     deviation.status = UploadStatus.FAILED
                     deviation.error = "Publish failed"
@@ -987,13 +996,13 @@ class UploaderService:
                 
                 self.logger.info(f"[{idx}/{len(deviation_ids)}] Publishing {deviation.filename}")
                 success = self._publish_deviation(deviation, access_token)
-                
+
                 if success:
                     deviation.status = UploadStatus.PUBLISHED
                     self.deviation_repository.update_deviation(deviation)
                     results["success"].append(dev_id)
                     self.logger.info(f"Successfully published {deviation.filename}")
-                    
+
                     # Delete file after successful publish
                     if deviation.file_path:
                         try:
@@ -1003,13 +1012,20 @@ class UploaderService:
                                 self.logger.info(f"Deleted file {deviation.file_path}")
                         except Exception as e:
                             self.logger.warning(f"Failed to delete file {deviation.file_path}: {e}")
+
+                    # Delete deviation record from database after successful upload
+                    try:
+                        self.deviation_repository.delete_deviation(dev_id)
+                        self.logger.info(f"Deleted deviation record {dev_id} from database")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to delete deviation record {dev_id} from database: {e}")
                 else:
                     deviation.status = UploadStatus.FAILED
                     deviation.error = "Publish failed"
                     self.deviation_repository.update_deviation(deviation)
                     results["failed"].append({"id": dev_id, "error": "Publish failed"})
                     self.logger.error(f"Failed to publish {deviation.filename}")
-                
+
                 # Rate limiting: 2 second delay between uploads
                 if idx < len(deviation_ids):
                     import time
