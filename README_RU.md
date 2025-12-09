@@ -41,12 +41,13 @@
 - Responsive UI (Bootstrap 5)
 - REST API для всех операций
 
----------
+
 ## _Screenshots_
 
 - Statistics
 - Charts
-- Mas.uploader
+- Bulk Loader
+---------
 
 <details>
   <summary> --== Open views image ==-- </summary>
@@ -56,6 +57,7 @@
 ![DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png)
 
 </details>
+
 ---------
 
 ## Быстрый старт

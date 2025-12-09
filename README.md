@@ -39,12 +39,14 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 - Responsive UI (Bootstrap 5)
 - REST API for all operations
 
----------
+
 ## _Screenshots_
 
 - Statistics
 - Charts
-- Mas.uploader
+- Bulk Loader
+
+---------
 
 <details>
   <summary> --== Open views image ==-- </summary>
@@ -54,6 +56,7 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 ![DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png)
 
 </details>
+
 ---------
 
 ## Quick Start
