@@ -1,7 +1,5 @@
 # DeviantArt Manager
 
-> **Language**: [English](README_EN.md)
-
 [![CI](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/ci.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/sni10/deviant_uploader/release.yml?style=for-the-badge&logo=github&label=Release)](https://github.com/sni10/deviant_uploader/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
@@ -10,142 +8,159 @@
 [![Tests](https://img.shields.io/badge/tests-66%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-47%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 
-Веб-приложение для управления контентом на DeviantArt: пакетная загрузка, статистика, графики.
+Web app for managing DeviantArt content: batch uploads, statistics, charts.
 
-## Возможности
+## Features
 
 ### 📊 Stats Dashboard
-- Просмотр статистики всех девиаций (просмотры, избранное, комментарии)
-- Дневные дельты и история изменений
-- Автосинхронизация всех галерей с DeviantArt
-- Отслеживание вотчеров и их прироста
-- Сортировка и фильтрация
+- View statistics for all deviations (views, favourites, comments)
+- Daily deltas and change history
+- Auto-sync across all galleries
+- Watcher tracking with growth metrics
+- Sorting and filtering
 
 ### 📈 Charts Dashboard
-- Интерактивные графики статистики за выбранный период
-- Фильтрация по конкретным девиациям
-- История вотчеров с визуализацией
-- Экспорт данных
+- Interactive statistics charts for selected periods
+- Filter by specific deviations
+- Watcher history visualization
+- Data export
 
 ### 🚀 Upload Admin
-- Пакетная загрузка изображений на DeviantArt
-- Система пресетов (теги, галереи, настройки)
-- Batch-операции: stash, publish, delete
-- Предпросмотр с миниатюрами
-- Управление статусами загрузок
+- Batch image uploads to DeviantArt
+- Preset system (tags, galleries, settings)
+- Batch operations: stash, publish, delete
+- Thumbnail previews
+- Upload status management
 
-### Технические особенности
-- OAuth2 аутентификация с автообновлением токенов
-- Поддержка SQLite и PostgreSQL
-- Rate limiting с exponential backoff
+### Technical Features
+- OAuth2 authentication with auto-refresh
+- SQLite and PostgreSQL support
+- Rate limiting with exponential backoff
 - Responsive UI (Bootstrap 5)
-- REST API для всех операций
+- REST API for all operations
 
-## Быстрый старт
+---------
+## _Screenshots_
 
-### 1. Установка
+- Statistics
+- Charts
+- Mas.uploader
+
+<details>
+  <summary> --== Open views image ==-- </summary>
+
+![DeviantArt-Stats-Dashboard-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Stats-Dashboard-12-09-2025_09_54_AM.png)
+![Statistics-Charts-DeviantArt-Dashboard-12-09-2025_09_54_AM.png](doc/img/Statistics-Charts-DeviantArt-Dashboard-12-09-2025_09_54_AM.png)
+![DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png)
+
+</details>
+---------
+
+## Quick Start
+
+### 1. Installation
 
 ```bash
-# Клонировать репозиторий
+# Clone repository
 git clone https://github.com/sni10/deviant_uploader.git
 cd deviant_uploader
 
-# Установить зависимости
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Конфигурация
+### 2. Configuration
 
-Создайте `.env` файл:
+Create `.env` file:
 
 ```bash
 cp .env.example .env
 ```
 
-Заполните обязательные параметры:
+Fill required parameters:
 
 ```env
-DA_CLIENT_ID=ваш_client_id
-DA_CLIENT_SECRET=ваш_client_secret
+DA_CLIENT_ID=your_client_id
+DA_CLIENT_SECRET=your_client_secret
 ```
 
-Получить credentials: https://www.deviantart.com/developers/
+Get credentials: https://www.deviantart.com/developers/
 
-### 3. Первоначальная настройка
+### 3. Initial Setup
 
 ```bash
-# Получить информацию о пользователе
+# Fetch user information
 python fetch_user.py
 
-# Синхронизировать галереи
+# Sync galleries
 python fetch_galleries.py
 ```
 
-### 4. Запуск веб-интерфейса
+### 4. Start Web Interface
 
 ```bash
 python run_stats.py
 ```
 
-Откройте браузер: `http://localhost:5000`
+Open browser: `http://localhost:5000`
 
-## Веб-интерфейсы
+## Web Interfaces
 
 ### Stats Dashboard (`http://localhost:5000/`)
 
-Мониторинг статистики ваших работ.
+Monitor your artwork statistics.
 
-**Основные функции:**
-- Таблица всех девиаций с метриками
-- Прирост/падение за последние сутки
-- Синхронизация всех галерей (кнопка Sync)
-- Счетчик вотчеров
-- Сортировка по столбцам
+**Key Functions:**
+- Table of all deviations with metrics
+- Daily growth/decline indicators
+- Sync all galleries (Sync button)
+- Watcher counter
+- Column sorting
 
 ### Charts Dashboard (`http://localhost:5000/charts.html`)
 
-Визуализация статистики.
+Statistics visualization.
 
-**Основные функции:**
-- Графики просмотров, избранного, комментариев
-- Выбор периода (7/14/30 дней)
-- Фильтрация по девиациям
-- График истории вотчеров
+**Key Functions:**
+- Charts for views, favourites, comments
+- Period selection (7/14/30 days)
+- Deviation filtering
+- Watcher history graph
 
 ### Upload Admin (`http://localhost:5000/upload_admin.html`)
 
-Управление загрузками.
+Upload management.
 
-**Основные функции:**
-- Сканирование папки `upload/`
-- Создание пресетов настроек
-- Применение пресетов к выбранным файлам
-- Batch Stash - загрузка файлов в DeviantArt Stash
-- Batch Publish - публикация работ
-- Batch Upload - загрузка и публикация одной командой
-- Удаление файлов
+**Key Functions:**
+- Scan `upload/` folder
+- Create setting presets
+- Apply presets to selected files
+- Batch Stash - upload files to DeviantArt Stash
+- Batch Publish - publish artworks
+- Batch Upload - upload and publish in one command
+- Delete files
 
 **Workflow:**
-1. Поместите изображения в папку `upload/`
-2. Нажмите "Scan Files"
-3. Создайте или выберите пресет с настройками
-4. Примените пресет к выбранным файлам
-5. Нажмите "Upload Selected" для загрузки и публикации
+1. Place images in `upload/` folder
+2. Click "Scan Files"
+3. Create or select preset with settings
+4. Apply preset to selected files
+5. Click "Upload Selected" to upload and publish
 
-## Конфигурация
+## Configuration
 
-| Переменная | Обязательна | По умолчанию | Описание |
+| Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DA_CLIENT_ID` | Да | - | DeviantArt Client ID |
-| `DA_CLIENT_SECRET` | Да | - | DeviantArt Client Secret |
-| `DA_REDIRECT_URI` | Нет | `http://localhost:8080/callback` | OAuth redirect URI |
-| `DATABASE_TYPE` | Нет | `sqlite` | `sqlite` или `postgresql` |
-| `DATABASE_PATH` | Нет | `data/deviant.db` | Путь к SQLite БД |
-| `DATABASE_URL` | Нет | - | PostgreSQL connection string |
-| `UPLOAD_DIR` | Нет | `upload` | Папка для загружаемых файлов |
-| `LOG_LEVEL` | Нет | `INFO` | Уровень логирования |
+| `DA_CLIENT_ID` | Yes | - | DeviantArt Client ID |
+| `DA_CLIENT_SECRET` | Yes | - | DeviantArt Client Secret |
+| `DA_REDIRECT_URI` | No | `http://localhost:8080/callback` | OAuth redirect URI |
+| `DATABASE_TYPE` | No | `sqlite` | `sqlite` or `postgresql` |
+| `DATABASE_PATH` | No | `data/deviant.db` | SQLite database path |
+| `DATABASE_URL` | No | - | PostgreSQL connection string |
+| `UPLOAD_DIR` | No | `upload` | Upload folder path |
+| `LOG_LEVEL` | No | `INFO` | Logging level |
 
-## Структура проекта
+## Project Structure
 
 ```
 deviant/
@@ -153,74 +168,77 @@ deviant/
 │   ├── api/                    # Flask REST API
 │   │   ├── stats_api.py       # Stats & Charts API + Upload Admin API
 │   │   └── upload_admin_api.py # (deprecated, merged into stats_api)
-│   ├── config/                # Конфигурация
-│   │   └── settings.py        # Настройки из .env
-│   ├── domain/                # Доменные модели
+│   ├── config/                # Configuration
+│   │   └── settings.py        # Settings from .env
+│   ├── domain/                # Domain models
 │   │   └── models.py          # User, Gallery, Deviation, UploadPreset
-│   ├── service/               # Бизнес-логика
-│   │   ├── auth_service.py    # OAuth2 аутентификация
-│   │   ├── stats_service.py   # Синхронизация статистики DeviantArt
-│   │   ├── uploader.py        # Загрузка и публикация девиаций
-│   │   ├── gallery_service.py # Управление галереями
-│   │   └── user_service.py    # Управление пользователями
-│   ├── storage/               # Репозитории и БД
-│   │   ├── adapters/          # DB адаптеры (SQLite, PostgreSQL)
-│   │   ├── models.py          # SQLAlchemy модели
-│   │   ├── *_repository.py    # Репозитории для каждой сущности
-│   │   └── database.py        # Схема БД
+│   ├── service/               # Business logic
+│   │   ├── auth_service.py    # OAuth2 authentication
+│   │   ├── stats_service.py   # DeviantArt stats sync
+│   │   ├── uploader.py        # Deviation upload & publish
+│   │   ├── gallery_service.py # Gallery management
+│   │   └── user_service.py    # User management
+│   ├── storage/               # Repositories & DB
+│   │   ├── adapters/          # DB adapters (SQLite, PostgreSQL)
+│   │   ├── models.py          # SQLAlchemy models
+│   │   ├── *_repository.py    # Repositories for each entity
+│   │   └── database.py        # DB schema
 │   ├── log/
-│   │   └── logger.py          # Централизованное логирование
+│   │   └── logger.py          # Centralized logging
 │   └── fs/
-│       └── utils.py           # Утилиты для работы с файлами
-├── static/                    # Веб-интерфейсы
+│       └── utils.py           # File utilities
+├── static/                    # Web interfaces
 │   ├── stats.html             # Stats Dashboard
 │   ├── stats.js
 │   ├── charts.html            # Charts Dashboard
 │   ├── charts.js
 │   ├── upload_admin.html      # Upload Admin Interface
 │   └── upload_admin.js
-├── tests/                     # Тесты
-├── data/                      # База данных SQLite
-├── upload/                    # Папка для загрузки изображений
-│   └── done/                  # Загруженные файлы
-├── logs/                      # Логи приложения
-├── run_stats.py               # Запуск веб-сервера
-├── fetch_user.py              # Синхронизация пользователя
-├── fetch_galleries.py         # Синхронизация галерей
-├── requirements.txt           # Зависимости Python
-└── .env                       # Конфигурация (создать из .env.example)
+├── tests/                     # Tests
+├── data/                      # SQLite database
+├── upload/                    # Upload folder
+│   └── done/                  # Uploaded files
+├── logs/                      # Application logs
+├── run_stats.py               # Web server launcher
+├── fetch_user.py              # User sync
+├── fetch_galleries.py         # Galleries sync
+├── requirements.txt           # Python dependencies
+└── .env                       # Configuration (create from .env.example)
 ```
 
-## База данных
+## Database
 
-По умолчанию используется SQLite:
+SQLite is used by default:
 
 ```env
 DATABASE_TYPE=sqlite
 DATABASE_PATH=data/deviant.db
 ```
 
-Для использования PostgreSQL:
+To use PostgreSQL:
 
 ```env
 DATABASE_TYPE=postgresql
 DATABASE_URL=postgresql://user:password@localhost:5432/deviant
 ```
 
-## Архитектура
+## Architecture
 
-Приложение следует принципам DDD, SOLID, OOP:
+The app follows DDD, SOLID, OOP principles:
 
-- **Domain Layer**: модели User, Gallery, Deviation
-- **Storage Layer**: репозитории с единым интерфейсом (SQLite/PostgreSQL)
-- **Service Layer**: бизнес-логика (Auth, Stats, Upload)
+- **Domain Layer**: User, Gallery, Deviation models
+- **Storage Layer**: repositories with unified interface (SQLite/PostgreSQL)
+- **Service Layer**: business logic (Auth, Stats, Upload)
 - **API Layer**: Flask REST API
-- **Presentation Layer**: Bootstrap 5 веб-интерфейсы
+- **Presentation Layer**: Bootstrap 5 web interfaces
 
-## Лицензия
+## License
 
-MIT License - см. [LICENSE](LICENSE)
+MIT License - see [LICENSE](LICENSE)
 
-## Вклад в проект
 
-Issues и Pull Requests приветствуются!
+## Contributing
+
+Issues and Pull Requests are welcome!
+
+> **Additional Language**: [RU](README_RU.md)
