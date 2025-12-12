@@ -149,6 +149,9 @@ def get_mass_fave_service():
         MassFaveService instance
     """
     if 'mass_fave_service' not in g:
+        # Ensure repositories and connection are initialized
+        get_repositories()
+
         feed_deviation_repo = FeedDeviationRepository(g.connection)
         logger = g.logger
         mass_fave_service = MassFaveService(feed_deviation_repo, logger)

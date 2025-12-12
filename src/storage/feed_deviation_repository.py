@@ -1,15 +1,30 @@
-"""Repository for feed deviations queue and state management."""
+"""Repository for feed deviations queue and state management using SQLAlchemy Core."""
 
+from sqlalchemy import select, insert, update, delete, func
 from .base_repository import BaseRepository
+from .feed_tables import feed_state, feed_deviations
 
 
 class FeedDeviationRepository(BaseRepository):
     """Provides persistence for feed deviations queue and cursor state.
 
-    This repository manages two tables:
+    This repository manages two tables using SQLAlchemy Core:
     - feed_state: Stores cursor and other state for feed collection
     - feed_deviations: Queue of deviations from feed for auto-faving
     """
+
+    def _execute_core(self, statement):
+        """Execute SQLAlchemy Core statement and return result.
+
+        Handles both SQLAlchemy connections and raw SQLite connections.
+        """
+        # Check if this is SQLAlchemy connection (has _session attribute)
+        if hasattr(self.conn, '_session'):
+            return self.conn._session.execute(statement)
+        else:
+            # For SQLite adapter, compile to SQL string
+            compiled = statement.compile(compile_kwargs={"literal_binds": True})
+            return self.conn.execute(str(compiled))
 
     # ========== State Management ==========
 
@@ -17,16 +32,14 @@ class FeedDeviationRepository(BaseRepository):
         """Get state value by key.
 
         Args:
-            key: State key (e.g., 'feed_cursor')
+            key: State key (e.g., 'feed_offset')
 
         Returns:
             State value or None if not found
         """
-        cursor = self.conn.execute(
-            "SELECT value FROM feed_state WHERE key = ?",
-            (key,),
-        )
-        row = cursor.fetchone()
+        stmt = select(feed_state.c.value).where(feed_state.c.key == key)
+        result = self._execute_core(stmt)
+        row = result.fetchone()
         return row[0] if row else None
 
     def set_state(self, key: str, value: str) -> None:
@@ -36,16 +49,21 @@ class FeedDeviationRepository(BaseRepository):
             key: State key
             value: State value
         """
-        self.conn.execute(
-            """
-            INSERT INTO feed_state (key, value, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (key, value),
-        )
+        # Check if exists
+        existing = self.get_state(key)
+
+        if existing is not None:
+            # Update
+            stmt = (
+                update(feed_state)
+                .where(feed_state.c.key == key)
+                .values(value=value, updated_at=func.now())
+            )
+        else:
+            # Insert
+            stmt = insert(feed_state).values(key=key, value=value)
+
+        self._execute_core(stmt)
         self.conn.commit()
 
     # ========== Deviation Queue Management ==========
@@ -53,23 +71,36 @@ class FeedDeviationRepository(BaseRepository):
     def add_deviation(
         self, deviationid: str, ts: int, status: str = "pending"
     ) -> None:
-        """Add deviation to queue (or update if exists).
+        """Add deviation to queue (or update timestamp if exists).
 
         Args:
             deviationid: DeviantArt deviation UUID
             ts: Unix timestamp from feed event
             status: Status (pending/faved/failed), defaults to 'pending'
         """
-        self.conn.execute(
-            """
-            INSERT INTO feed_deviations (deviationid, ts, status, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(deviationid) DO UPDATE SET
-                ts = GREATEST(feed_deviations.ts, excluded.ts),
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (deviationid, ts, status),
+        # Try to get existing
+        stmt = select(feed_deviations.c.ts).where(
+            feed_deviations.c.deviationid == deviationid
         )
+        result = self._execute_core(stmt)
+        existing_row = result.fetchone()
+
+        if existing_row is not None:
+            # Update: use max of current and new timestamp
+            existing_ts = existing_row[0]
+            new_ts = max(existing_ts, ts)
+            stmt = (
+                update(feed_deviations)
+                .where(feed_deviations.c.deviationid == deviationid)
+                .values(ts=new_ts, updated_at=func.now())
+            )
+        else:
+            # Insert new
+            stmt = insert(feed_deviations).values(
+                deviationid=deviationid, ts=ts, status=status
+            )
+
+        self._execute_core(stmt)
         self.conn.commit()
 
     def get_one_pending(self) -> dict | None:
@@ -78,20 +109,32 @@ class FeedDeviationRepository(BaseRepository):
         Returns:
             Dictionary with deviation fields, or None if queue is empty
         """
-        cursor = self.conn.execute(
-            """
-            SELECT deviationid, ts, status, attempts, last_error, updated_at
-            FROM feed_deviations
-            WHERE status = 'pending'
-            ORDER BY ts DESC
-            LIMIT 1
-            """
+        stmt = (
+            select(
+                feed_deviations.c.deviationid,
+                feed_deviations.c.ts,
+                feed_deviations.c.status,
+                feed_deviations.c.attempts,
+                feed_deviations.c.last_error,
+                feed_deviations.c.updated_at,
+            )
+            .where(feed_deviations.c.status == "pending")
+            .order_by(feed_deviations.c.ts.desc())
+            .limit(1)
         )
-        row = cursor.fetchone()
+        result = self._execute_core(stmt)
+        row = result.fetchone()
         if row is None:
             return None
-        columns = [desc[0] for desc in cursor.description]
-        return dict(zip(columns, row))
+
+        return {
+            "deviationid": row[0],
+            "ts": row[1],
+            "status": row[2],
+            "attempts": row[3],
+            "last_error": row[4],
+            "updated_at": row[5],
+        }
 
     def mark_faved(self, deviationid: str) -> None:
         """Mark deviation as successfully faved.
@@ -99,14 +142,12 @@ class FeedDeviationRepository(BaseRepository):
         Args:
             deviationid: DeviantArt deviation UUID
         """
-        self.conn.execute(
-            """
-            UPDATE feed_deviations
-            SET status = 'faved', last_error = NULL, updated_at = CURRENT_TIMESTAMP
-            WHERE deviationid = ?
-            """,
-            (deviationid,),
+        stmt = (
+            update(feed_deviations)
+            .where(feed_deviations.c.deviationid == deviationid)
+            .values(status="faved", last_error=None, updated_at=func.now())
         )
+        self._execute_core(stmt)
         self.conn.commit()
 
     def mark_failed(self, deviationid: str, error: str) -> None:
@@ -116,17 +157,17 @@ class FeedDeviationRepository(BaseRepository):
             deviationid: DeviantArt deviation UUID
             error: Error message
         """
-        self.conn.execute(
-            """
-            UPDATE feed_deviations
-            SET status = 'failed',
-                attempts = attempts + 1,
-                last_error = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE deviationid = ?
-            """,
-            (error[:500], deviationid),
+        stmt = (
+            update(feed_deviations)
+            .where(feed_deviations.c.deviationid == deviationid)
+            .values(
+                status="failed",
+                attempts=feed_deviations.c.attempts + 1,
+                last_error=error[:500],
+                updated_at=func.now(),
+            )
         )
+        self._execute_core(stmt)
         self.conn.commit()
 
     def bump_attempt(self, deviationid: str, error: str) -> None:
@@ -136,16 +177,16 @@ class FeedDeviationRepository(BaseRepository):
             deviationid: DeviantArt deviation UUID
             error: Error message
         """
-        self.conn.execute(
-            """
-            UPDATE feed_deviations
-            SET attempts = attempts + 1,
-                last_error = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE deviationid = ?
-            """,
-            (error[:500], deviationid),
+        stmt = (
+            update(feed_deviations)
+            .where(feed_deviations.c.deviationid == deviationid)
+            .values(
+                attempts=feed_deviations.c.attempts + 1,
+                last_error=error[:500],
+                updated_at=func.now(),
+            )
         )
+        self._execute_core(stmt)
         self.conn.commit()
 
     def get_stats(self) -> dict:
@@ -154,25 +195,29 @@ class FeedDeviationRepository(BaseRepository):
         Returns:
             Dictionary with counts: {pending, faved, failed, total}
         """
-        cursor = self.conn.execute(
-            """
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'pending') as pending,
-                COUNT(*) FILTER (WHERE status = 'faved') as faved,
-                COUNT(*) FILTER (WHERE status = 'failed') as failed,
-                COUNT(*) as total
-            FROM feed_deviations
-            """
+        # Separate queries for SQLite compatibility (no FILTER support in older versions)
+        stmt_pending = select(func.count()).select_from(feed_deviations).where(
+            feed_deviations.c.status == "pending"
         )
-        row = cursor.fetchone()
-        if row:
-            return {
-                "pending": row[0] or 0,
-                "faved": row[1] or 0,
-                "failed": row[2] or 0,
-                "total": row[3] or 0,
-            }
-        return {"pending": 0, "faved": 0, "failed": 0, "total": 0}
+        stmt_faved = select(func.count()).select_from(feed_deviations).where(
+            feed_deviations.c.status == "faved"
+        )
+        stmt_failed = select(func.count()).select_from(feed_deviations).where(
+            feed_deviations.c.status == "failed"
+        )
+        stmt_total = select(func.count()).select_from(feed_deviations)
+
+        pending = self._execute_core(stmt_pending).scalar() or 0
+        faved = self._execute_core(stmt_faved).scalar() or 0
+        failed = self._execute_core(stmt_failed).scalar() or 0
+        total = self._execute_core(stmt_total).scalar() or 0
+
+        return {
+            "pending": pending,
+            "faved": faved,
+            "failed": failed,
+            "total": total,
+        }
 
     def clear_queue(self, status: str | None = None) -> int:
         """Clear queue (optionally by status).
@@ -184,10 +229,14 @@ class FeedDeviationRepository(BaseRepository):
             Number of deleted rows
         """
         if status:
-            cursor = self.conn.execute(
-                "DELETE FROM feed_deviations WHERE status = ?", (status,)
-            )
+            stmt = delete(feed_deviations).where(feed_deviations.c.status == status)
         else:
-            cursor = self.conn.execute("DELETE FROM feed_deviations")
+            stmt = delete(feed_deviations)
+
+        result = self._execute_core(stmt)
         self.conn.commit()
-        return cursor.rowcount
+
+        # Get rowcount
+        if hasattr(result, 'rowcount'):
+            return result.rowcount
+        return 0
