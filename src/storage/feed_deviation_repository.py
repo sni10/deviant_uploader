@@ -26,6 +26,24 @@ class FeedDeviationRepository(BaseRepository):
             compiled = statement.compile(compile_kwargs={"literal_binds": True})
             return self.conn.execute(str(compiled))
 
+    def _scalar(self, statement) -> int | str | None:
+        """Execute statement and return first column of the first row.
+
+        This method provides compatibility between SQLAlchemy Result objects
+        and sqlite3.Cursor objects.
+        """
+        result = self._execute_core(statement)
+
+        # SQLAlchemy Result
+        if hasattr(result, "scalar"):
+            return result.scalar()
+
+        # sqlite3.Cursor
+        row = result.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
     # ========== State Management ==========
 
     def get_state(self, key: str) -> str | None:
@@ -57,7 +75,7 @@ class FeedDeviationRepository(BaseRepository):
             stmt = (
                 update(feed_state)
                 .where(feed_state.c.key == key)
-                .values(value=value, updated_at=func.now())
+                .values(value=value, updated_at=func.current_timestamp())
             )
         else:
             # Insert
@@ -92,7 +110,7 @@ class FeedDeviationRepository(BaseRepository):
             stmt = (
                 update(feed_deviations)
                 .where(feed_deviations.c.deviationid == deviationid)
-                .values(ts=new_ts, updated_at=func.now())
+                .values(ts=new_ts, updated_at=func.current_timestamp())
             )
         else:
             # Insert new
@@ -145,7 +163,11 @@ class FeedDeviationRepository(BaseRepository):
         stmt = (
             update(feed_deviations)
             .where(feed_deviations.c.deviationid == deviationid)
-            .values(status="faved", last_error=None, updated_at=func.now())
+            .values(
+                status="faved",
+                last_error=None,
+                updated_at=func.current_timestamp(),
+            )
         )
         self._execute_core(stmt)
         self.conn.commit()
@@ -164,7 +186,7 @@ class FeedDeviationRepository(BaseRepository):
                 status="failed",
                 attempts=feed_deviations.c.attempts + 1,
                 last_error=error[:500],
-                updated_at=func.now(),
+                updated_at=func.current_timestamp(),
             )
         )
         self._execute_core(stmt)
@@ -183,7 +205,7 @@ class FeedDeviationRepository(BaseRepository):
             .values(
                 attempts=feed_deviations.c.attempts + 1,
                 last_error=error[:500],
-                updated_at=func.now(),
+                updated_at=func.current_timestamp(),
             )
         )
         self._execute_core(stmt)
@@ -207,10 +229,10 @@ class FeedDeviationRepository(BaseRepository):
         )
         stmt_total = select(func.count()).select_from(feed_deviations)
 
-        pending = self._execute_core(stmt_pending).scalar() or 0
-        faved = self._execute_core(stmt_faved).scalar() or 0
-        failed = self._execute_core(stmt_failed).scalar() or 0
-        total = self._execute_core(stmt_total).scalar() or 0
+        pending = self._scalar(stmt_pending) or 0
+        faved = self._scalar(stmt_faved) or 0
+        failed = self._scalar(stmt_failed) or 0
+        total = self._scalar(stmt_total) or 0
 
         return {
             "pending": pending,

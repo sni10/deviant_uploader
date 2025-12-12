@@ -82,14 +82,19 @@
             </div>
             <div class="card-body">
                 <div class="row g-3 align-items-end">
-                    <div class="col-md-4">
+                    <div class="col-md-12">
                         <label for="pages-input" class="form-label small text-muted mb-1">Number of Pages</label>
-                        <input type="number" id="pages-input" class="form-control" value="5" min="1" max="20">
+                        <div class="row g-8 align-items-end">
+                        <div class="col-md-4">
+                            <input type="number" id="pages-input" class="form-control" value="5" min="1" max="20">
+                        </div>
+                        <div class="col-md-8">
+                            <button class="btn btn-primary" onclick="collectFeed()">Collect New Deviations</button>
+                        </div>
+                        </div>
                         <small class="form-text text-muted">Each page contains up to 50 deviations</small>
                     </div>
-                    <div class="col-md-8">
-                        <button class="btn btn-primary" onclick="collectFeed()">Collect New Deviations</button>
-                    </div>
+
                 </div>
             </div>
         </div>
