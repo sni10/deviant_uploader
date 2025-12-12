@@ -260,6 +260,25 @@ CREATE INDEX IF NOT EXISTS idx_deviations_filename ON deviations(filename);
 
 -- Index for faster deviation lookups by user_id
 CREATE INDEX IF NOT EXISTS idx_deviations_user_id ON deviations(user_id);
+
+-- Feed state table: stores cursor and other state for feed collection
+CREATE TABLE IF NOT EXISTS feed_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Feed deviations table: queue of deviations from feed for auto-faving
+CREATE TABLE IF NOT EXISTS feed_deviations (
+    deviationid TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'faved', 'failed')),
+    attempts INTEGER DEFAULT 0,
+    last_error TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_feed_deviations_status_ts ON feed_deviations(status, ts DESC);
 """
 
 

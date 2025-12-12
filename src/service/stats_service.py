@@ -134,6 +134,17 @@ class StatsService:
 
                     if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
                         attempts += 1
+
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                                delay = min(delay, 60.0)  # Cap at 60 seconds
+                            except ValueError:
+                                # If not a number, use exponential backoff
+                                pass
+
                         self.logger.warning(
                             "Gallery fetch rate-limited for folder %s at offset %s "
                             "(attempt %s/%s), backing off for %.1f seconds.",
@@ -246,6 +257,17 @@ class StatsService:
 
                     if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
                         attempts += 1
+
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                                delay = min(delay, 60.0)  # Cap at 60 seconds
+                            except ValueError:
+                                # If not a number, use exponential backoff
+                                pass
+
                         self.logger.warning(
                             "Metadata fetch rate-limited for batch starting at %d "
                             "(attempt %d/%d), backing off for %.1f seconds.",
@@ -352,6 +374,17 @@ class StatsService:
 
                     if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
                         attempts += 1
+
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                                delay = min(delay, 60.0)  # Cap at 60 seconds
+                            except ValueError:
+                                # If not a number, use exponential backoff
+                                pass
+
                         self.logger.warning(
                             "Deviation fetch rate-limited for %s (attempt %s/%s), "
                             "backing off for %.1f seconds.",
@@ -434,12 +467,47 @@ class StatsService:
 
         self.logger.info("Fetching user profile for snapshot: %s", username)
 
-        try:
-            resp = requests.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            self.logger.error("Failed to fetch user profile %s: %s", username, exc)
-            return None
+        attempts = 0
+        delay = self.RATE_LIMIT_INITIAL_DELAY
+
+        while True:
+            try:
+                resp = requests.get(url, params=params, timeout=30)
+                resp.raise_for_status()
+                break
+            except requests.HTTPError as exc:  # noqa: BLE001
+                is_rate_limited = self._is_rate_limited_response(resp)
+
+                if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
+                    attempts += 1
+
+                    # Check for Retry-After header
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = float(retry_after)
+                            delay = min(delay, 60.0)  # Cap at 60 seconds
+                        except ValueError:
+                            # If not a number, use exponential backoff
+                            pass
+
+                    self.logger.warning(
+                        "User profile fetch rate-limited for %s (attempt %s/%s), "
+                        "backing off for %.1f seconds.",
+                        username,
+                        attempts,
+                        self.RATE_LIMIT_MAX_RETRIES,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+
+                self.logger.error("Failed to fetch user profile %s: %s", username, exc)
+                return None
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to fetch user profile %s: %s", username, exc)
+                return None
 
         try:
             payload = resp.json()
