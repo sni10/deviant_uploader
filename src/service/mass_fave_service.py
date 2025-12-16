@@ -15,7 +15,7 @@ class MassFaveService:
     """Coordinates feed collection and auto-faving workflow."""
 
     FEED_URL = "https://www.deviantart.com/api/v1/oauth2/browse/deviantsyouwatch"
-    FAVE_URL = "https://www.deviantart.com/collections/fave"
+    FAVE_URL = "https://www.deviantart.com/api/v1/oauth2/collections/fave"
 
     def __init__(
         self,

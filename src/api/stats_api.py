@@ -143,21 +143,26 @@ def get_upload_services():
 
 def get_mass_fave_service():
     """
-    Get or create mass fave service for the current request.
+    Get or create mass fave service as application-level singleton.
+
+    The MassFaveService runs a background worker thread that must persist
+    beyond individual HTTP requests. Therefore, it uses its own dedicated
+    database connection that is NOT closed by teardown_db().
 
     Returns:
-        MassFaveService instance
+        MassFaveService instance (singleton per application)
     """
-    if 'mass_fave_service' not in g:
-        # Ensure repositories and connection are initialized
-        get_repositories()
+    from flask import current_app
 
-        feed_deviation_repo = FeedDeviationRepository(g.connection)
-        logger = g.logger
+    if 'MASS_FAVE_SERVICE' not in current_app.config:
+        # Create dedicated connection for the worker (not tied to request lifecycle)
+        worker_connection = get_connection()
+        feed_deviation_repo = FeedDeviationRepository(worker_connection)
+        logger = current_app.config['APP_LOGGER']
         mass_fave_service = MassFaveService(feed_deviation_repo, logger)
-        g.mass_fave_service = mass_fave_service
+        current_app.config['MASS_FAVE_SERVICE'] = mass_fave_service
 
-    return g.mass_fave_service
+    return current_app.config['MASS_FAVE_SERVICE']
 
 
 def create_app(config: Config = None) -> Flask:
