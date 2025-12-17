@@ -963,7 +963,11 @@ def create_app(config: Config = None) -> Flask:
                     'title': m.title,
                     'body': m.body,
                     'is_active': m.is_active,
-                    'created_at': m.created_at.isoformat() if m.created_at else None,
+                    'created_at': (
+                        m.created_at if isinstance(m.created_at, str)
+                        else m.created_at.isoformat() if m.created_at
+                        else None
+                    ),
                 }
                 for m in messages
             ]})
@@ -1231,6 +1235,22 @@ def create_app(config: Config = None) -> Flask:
             g.logger.error(f"Deselect all watchers failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
 
+    @app.route('/api/profile-messages/queue/remove-selected', methods=['POST'])
+    def remove_selected_watchers_from_queue():
+        """Remove selected watchers from in-memory queue.
+
+        Returns:
+            JSON with removed_count and remaining_count
+        """
+        try:
+            service = get_profile_message_service()
+            result = service.remove_selected_from_queue()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Remove selected watchers failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @app.route('/api/profile-messages/logs', methods=['GET'])
     def get_broadcast_logs():
         """Get broadcast logs.
@@ -1264,7 +1284,11 @@ def create_app(config: Config = None) -> Flask:
                     'commentid': log.commentid,
                     'status': log.status.value,
                     'error_message': log.error_message,
-                    'sent_at': log.sent_at.isoformat() if log.sent_at else None,
+                    'sent_at': (
+                        log.sent_at if isinstance(log.sent_at, str)
+                        else log.sent_at.isoformat() if log.sent_at
+                        else None
+                    ),
                     'profile_url': f"https://www.deviantart.com/{log.recipient_username}",
                 }
                 for log in logs
@@ -1293,12 +1317,146 @@ def create_app(config: Config = None) -> Flask:
                 {
                     'username': w.username,
                     'userid': w.userid,
-                    'fetched_at': w.fetched_at.isoformat() if w.fetched_at else None,
+                    'fetched_at': (
+                        w.fetched_at if isinstance(w.fetched_at, str)
+                        else w.fetched_at.isoformat() if w.fetched_at
+                        else None
+                    ),
                 }
                 for w in watchers
             ]})
         except Exception as e:
             g.logger.error(f"Get saved watchers failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/watchers/save', methods=['POST'])
+    def save_watcher_to_db():
+        """Save single watcher to database.
+
+        Expects JSON: {"username": "...", "userid": "..."}
+
+        Returns:
+            JSON with save result
+        """
+        try:
+            data = request.get_json() or {}
+            username = data.get('username', '').strip()
+            userid = data.get('userid', '').strip()
+
+            if not username or not userid:
+                return jsonify({
+                    'success': False,
+                    'error': 'username and userid are required'
+                }), 400
+
+            service = get_profile_message_service()
+            result = service.save_watcher_to_db(username, userid)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Save watcher failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/watchers/save-selected', methods=['POST'])
+    def save_selected_watchers_to_db():
+        """Save only selected watchers from queue to database.
+
+        Uses upsert to avoid duplicates.
+
+        Returns:
+            JSON with save results: {saved_count, failed_count, skipped_count}
+        """
+        try:
+            service = get_profile_message_service()
+            result = service.save_selected_to_db()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Save selected watchers failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/watchers/add-to-queue', methods=['POST'])
+    def add_saved_watcher_to_queue():
+        """Add saved watcher to sending queue.
+
+        Expects JSON: {"username": "...", "userid": "..."}
+
+        Returns:
+            JSON with add result
+        """
+        try:
+            data = request.get_json() or {}
+            username = data.get('username', '').strip()
+            userid = data.get('userid', '').strip()
+
+            if not username or not userid:
+                return jsonify({
+                    'success': False,
+                    'error': 'username and userid are required'
+                }), 400
+
+            service = get_profile_message_service()
+            result = service.add_saved_watcher_to_queue(username, userid)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Add watcher to queue failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/watchers/add-selected-to-queue', methods=['POST'])
+    def add_selected_saved_watchers_to_queue():
+        """Add selected saved watchers to sending queue.
+
+        Expects JSON:
+            {"watchers": [{"username": "...", "userid": "..."}, ...]}
+
+        Returns:
+            JSON with add results: {added_count, skipped_count, invalid_count}
+        """
+        try:
+            data = request.get_json() or {}
+            watchers = data.get('watchers', [])
+
+            if not isinstance(watchers, list):
+                return jsonify({
+                    'success': False,
+                    'error': 'watchers must be a list'
+                }), 400
+
+            if len(watchers) > 5000:
+                return jsonify({
+                    'success': False,
+                    'error': 'watchers list is too large (max 5000)'
+                }), 400
+
+            service = get_profile_message_service()
+            result = service.add_selected_saved_to_queue(watchers)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Add selected saved watchers to queue failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/watchers/add-all-to-queue', methods=['POST'])
+    def add_all_saved_to_queue():
+        """Add all saved watchers to sending queue.
+
+        Query params:
+            limit: Max watchers to add (default 1000)
+
+        Returns:
+            JSON with add results: {added_count, skipped_count}
+        """
+        try:
+            data = request.get_json() or {}
+            limit = int(data.get('limit', 1000))
+
+            service = get_profile_message_service()
+            result = service.add_all_saved_to_queue(limit)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Add all saved to queue failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
 
     # ========== UPLOAD ADMIN THUMBNAIL ROUTE ==========
