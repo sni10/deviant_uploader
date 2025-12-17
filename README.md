@@ -32,9 +32,17 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 - Thumbnail previews
 - Upload status management
 
+### ⭐ Mass Fave
+- Auto-faving workflow from feed collection
+- Queue-based processing with worker service
+- Feed deviation tracking and filtering
+- Batch favorite operations
+- Web UI integration
+
 ### Technical Features
 - OAuth2 authentication with auto-refresh
-- SQLite and PostgreSQL support
+- SQLite and PostgreSQL support (SQLite default)
+- SQLAlchemy Core for queries
 - Rate limiting with exponential backoff
 - Responsive UI (Bootstrap 5)
 - REST API for all operations
