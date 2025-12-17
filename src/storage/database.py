@@ -280,6 +280,16 @@ CREATE TABLE IF NOT EXISTS feed_deviations (
 
 CREATE INDEX IF NOT EXISTS idx_feed_deviations_status_ts ON feed_deviations(status, ts DESC);
 
+-- Watchers table: stores DeviantArt watchers (followers)
+CREATE TABLE IF NOT EXISTS watchers (
+    watcher_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    userid TEXT NOT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_watchers_username ON watchers(username);
+
 -- Profile messages table: stores profile comment templates
 CREATE TABLE IF NOT EXISTS profile_messages (
     message_id INTEGER PRIMARY KEY AUTOINCREMENT,
