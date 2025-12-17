@@ -279,6 +279,33 @@ CREATE TABLE IF NOT EXISTS feed_deviations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_feed_deviations_status_ts ON feed_deviations(status, ts DESC);
+
+-- Profile messages table: stores profile comment templates
+CREATE TABLE IF NOT EXISTS profile_messages (
+    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Profile message logs table: logs of profile comments sent to watchers
+CREATE TABLE IF NOT EXISTS profile_message_logs (
+    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    recipient_username TEXT NOT NULL,
+    recipient_userid TEXT NOT NULL,
+    commentid TEXT,
+    status TEXT NOT NULL CHECK(status IN ('sent', 'failed')),
+    error_message TEXT,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES profile_messages(message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_message_logs_message_id ON profile_message_logs(message_id);
+CREATE INDEX IF NOT EXISTS idx_profile_message_logs_status ON profile_message_logs(status);
+CREATE INDEX IF NOT EXISTS idx_profile_message_logs_recipient ON profile_message_logs(recipient_username);
 """
 
 
