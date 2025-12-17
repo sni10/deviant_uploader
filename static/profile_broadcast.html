@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile Broadcasting - DeviantArt Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <style>
+        body { background-color: #f8f9fa; }
+        .stat-card { border-left: 4px solid #0d6efd; }
+        .stat-value { font-size: 2rem; font-weight: bold; }
+        .stat-label { color: #6c757d; font-size: 0.875rem; text-transform: uppercase; }
+        .log-table { font-size: 0.875rem; }
+        .modal-lg { max-width: 800px; }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-3">
+        <div class="container py-4">
+            <a class="navbar-brand" href="/static/stats.html">DeviantArt Dashboard</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navMain">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/stats.html">Stats</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/charts.html">Charts</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/upload_admin.html">Upload Admin</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/mass_fave.html">Auto Fave</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="/profile_broadcast.html">Profile Broadcast</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <h1 class="h3 mb-4">Profile Broadcasting</h1>
+
+        <!-- Stats Row -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card stat-card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Queue</div>
+                        <div class="stat-value text-primary" id="stat-queue">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Sent</div>
+                        <div class="stat-value text-success" id="stat-sent">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Failed</div>
+                        <div class="stat-value text-danger" id="stat-failed">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Processed</div>
+                        <div class="stat-value text-info" id="stat-processed">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Message Templates -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Message Templates</h5>
+                <button class="btn btn-sm btn-primary" onclick="showCreateMessageModal()">Create New</button>
+            </div>
+            <div class="card-body">
+                <div id="messages-list"></div>
+            </div>
+        </div>
+
+        <!-- Fetch Watchers -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Fetch Watchers</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="username-input" class="form-label">Username</label>
+                        <input type="text" id="username-input" class="form-control" placeholder="Enter DA username">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="max-watchers-input" class="form-label">Max Watchers</label>
+                        <input type="number" id="max-watchers-input" class="form-control" value="50" min="1" max="500">
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary" onclick="fetchWatchers()">Fetch Watchers</button>
+                        <button class="btn btn-secondary ms-2" onclick="clearQueue()">Clear Queue</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Worker Control -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Broadcast Worker</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex gap-2 mb-3">
+                    <select id="message-select" class="form-select" style="max-width: 300px;">
+                        <option value="">Select message template</option>
+                    </select>
+                    <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Broadcasting</button>
+                    <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Broadcasting</button>
+                </div>
+                <div>
+                    <span class="badge bg-secondary" id="worker-status">Stopped</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status -->
+        <div id="status" class="alert alert-secondary py-2 mb-3" role="alert">Ready.</div>
+
+        <!-- Activity Log -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Send Log</h5>
+                <button class="btn btn-sm btn-secondary" onclick="loadLogs()">Refresh</button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm log-table">
+                        <thead>
+                            <tr>
+                                <th>Sent At</th>
+                                <th>Recipient</th>
+                                <th>Status</th>
+                                <th>Comment ID</th>
+                                <th>Error</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Message Modal -->
+    <div class="modal fade" id="messageModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="messageModalTitle">Create Message Template</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="message-title" class="form-label">Title</label>
+                        <input type="text" class="form-control" id="message-title" placeholder="Enter template title">
+                    </div>
+                    <div class="mb-3">
+                        <label for="message-body" class="form-label">Message Body</label>
+                        <textarea class="form-control" id="message-body" rows="5" placeholder="Enter comment text"></textarea>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="message-active" checked>
+                        <label class="form-check-label" for="message-active">
+                            Active
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveMessage()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <script src="/static/profile_broadcast.js"></script>
+</body>
+</html>

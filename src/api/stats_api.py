@@ -33,10 +33,13 @@ from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
 from ..storage.deviation_metadata_repository import DeviationMetadataRepository
 from ..storage.preset_repository import PresetRepository
 from ..storage.feed_deviation_repository import FeedDeviationRepository
+from ..storage.profile_message_repository import ProfileMessageRepository
+from ..storage.profile_message_log_repository import ProfileMessageLogRepository
 from ..service.auth_service import AuthService
 from ..service.stats_service import StatsService
 from ..service.uploader import UploaderService
 from ..service.mass_fave_service import MassFaveService
+from ..service.profile_message_service import ProfileMessageService
 from ..domain.models import UploadPreset
 
 
@@ -163,6 +166,32 @@ def get_mass_fave_service():
         current_app.config['MASS_FAVE_SERVICE'] = mass_fave_service
 
     return current_app.config['MASS_FAVE_SERVICE']
+
+
+def get_profile_message_service():
+    """
+    Get or create profile message service as application-level singleton.
+
+    The ProfileMessageService runs a background worker thread that must persist
+    beyond individual HTTP requests. Therefore, it uses its own dedicated
+    database connections that are NOT closed by teardown_db().
+
+    Returns:
+        ProfileMessageService instance (singleton per application)
+    """
+    from flask import current_app
+
+    if 'PROFILE_MESSAGE_SERVICE' not in current_app.config:
+        # Create dedicated connections for the worker (not tied to request lifecycle)
+        worker_conn1 = get_connection()
+        worker_conn2 = get_connection()
+        message_repo = ProfileMessageRepository(worker_conn1)
+        log_repo = ProfileMessageLogRepository(worker_conn2)
+        logger = current_app.config['APP_LOGGER']
+        profile_message_service = ProfileMessageService(message_repo, log_repo, logger)
+        current_app.config['PROFILE_MESSAGE_SERVICE'] = profile_message_service
+
+    return current_app.config['PROFILE_MESSAGE_SERVICE']
 
 
 def create_app(config: Config = None) -> Flask:
@@ -905,6 +934,340 @@ def create_app(config: Config = None) -> Flask:
             return jsonify(result)
         except Exception as e:
             g.logger.error(f"Reset failed deviations failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # ========== PROFILE MESSAGE BROADCASTING ROUTES ==========
+
+    @app.route('/profile_broadcast.html')
+    def profile_broadcast_page():
+        """Serve Profile Message Broadcasting page."""
+        return send_from_directory(STATIC_DIR, "profile_broadcast.html")
+
+    @app.route('/api/profile-messages', methods=['GET'])
+    def get_profile_messages():
+        """Get all profile message templates.
+
+        Returns:
+            JSON with list of message templates
+        """
+        try:
+            service = get_profile_message_service()
+            messages = service.message_repo.get_all_messages()
+
+            return jsonify({'success': True, 'data': [
+                {
+                    'message_id': m.message_id,
+                    'title': m.title,
+                    'body': m.body,
+                    'is_active': m.is_active,
+                    'created_at': m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in messages
+            ]})
+        except Exception as e:
+            g.logger.error(f"Get messages failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages', methods=['POST'])
+    def create_profile_message():
+        """Create new profile message template.
+
+        Expects JSON: {"title": "...", "body": "..."}
+
+        Returns:
+            JSON with created message ID
+        """
+        try:
+            data = request.get_json() or {}
+            title = data.get('title', '').strip()
+            body = data.get('body', '').strip()
+
+            if not title or not body:
+                return jsonify({'success': False, 'error': 'Title and body are required'}), 400
+
+            service = get_profile_message_service()
+            message_id = service.message_repo.create_message(title, body)
+
+            return jsonify({'success': True, 'message_id': message_id})
+        except Exception as e:
+            g.logger.error(f"Create message failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/<int:message_id>', methods=['PUT'])
+    def update_profile_message(message_id):
+        """Update profile message template.
+
+        Expects JSON: {"title": "...", "body": "...", "is_active": true/false}
+
+        Returns:
+            JSON with success status
+        """
+        try:
+            data = request.get_json() or {}
+            title = data.get('title')
+            body = data.get('body')
+            is_active = data.get('is_active')
+
+            service = get_profile_message_service()
+            service.message_repo.update_message(
+                message_id,
+                title=title.strip() if title else None,
+                body=body.strip() if body else None,
+                is_active=is_active
+            )
+
+            return jsonify({'success': True})
+        except Exception as e:
+            g.logger.error(f"Update message failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/<int:message_id>', methods=['DELETE'])
+    def delete_profile_message(message_id):
+        """Delete profile message template.
+
+        Returns:
+            JSON with success status
+        """
+        try:
+            service = get_profile_message_service()
+            service.message_repo.delete_message(message_id)
+
+            return jsonify({'success': True})
+        except Exception as e:
+            g.logger.error(f"Delete message failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/fetch-watchers', methods=['POST'])
+    def fetch_watchers():
+        """Fetch watchers and add to queue.
+
+        Expects JSON: {"username": "...", "max_watchers": 50}
+
+        Returns:
+            JSON with fetch results
+        """
+        try:
+            data = request.get_json() or {}
+            username = data.get('username', '').strip()
+            max_watchers = int(data.get('max_watchers', 50))
+
+            if not username:
+                return jsonify({'success': False, 'error': 'Username is required'}), 400
+
+            if max_watchers < 1 or max_watchers > 500:
+                return jsonify({'success': False, 'error': 'max_watchers must be between 1 and 500'}), 400
+
+            auth_service, _ = get_services()
+
+            if not auth_service.ensure_authenticated():
+                return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+            access_token = auth_service.get_valid_token()
+            if not access_token:
+                return jsonify({'success': False, 'error': 'Failed to obtain access token'}), 401
+
+            service = get_profile_message_service()
+            result = service.fetch_watchers(access_token, username, max_watchers)
+
+            return jsonify({'success': True, 'data': result})
+        except Exception as e:
+            g.logger.error(f"Fetch watchers failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/worker/start', methods=['POST'])
+    def start_broadcast_worker():
+        """Start worker to broadcast message to watchers queue.
+
+        Expects JSON: {"message_id": 1}
+
+        Returns:
+            JSON with start status
+        """
+        try:
+            data = request.get_json() or {}
+            message_id = data.get('message_id')
+
+            if not message_id:
+                return jsonify({'success': False, 'error': 'message_id is required'}), 400
+
+            auth_service, _ = get_services()
+
+            if not auth_service.ensure_authenticated():
+                return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+            access_token = auth_service.get_valid_token()
+            if not access_token:
+                return jsonify({'success': False, 'error': 'Failed to obtain access token'}), 401
+
+            service = get_profile_message_service()
+            result = service.start_worker(access_token, message_id)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Start broadcast worker failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/worker/stop', methods=['POST'])
+    def stop_broadcast_worker():
+        """Stop broadcast worker.
+
+        Returns:
+            JSON with stop status
+        """
+        try:
+            service = get_profile_message_service()
+            result = service.stop_worker()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Stop broadcast worker failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/worker/status', methods=['GET'])
+    def get_broadcast_worker_status():
+        """Get broadcast worker and queue status.
+
+        Returns:
+            JSON with status information
+        """
+        try:
+            service = get_profile_message_service()
+            status = service.get_worker_status()
+
+            return jsonify({'success': True, 'data': status})
+        except Exception as e:
+            g.logger.error(f"Get broadcast status failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/queue/clear', methods=['POST'])
+    def clear_watchers_queue():
+        """Clear watchers queue.
+
+        Returns:
+            JSON with cleared count
+        """
+        try:
+            service = get_profile_message_service()
+            result = service.clear_queue()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Clear queue failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/queue/list', methods=['GET'])
+    def get_watchers_list():
+        """Get watchers queue with selection status.
+
+        Returns:
+            JSON with watchers list
+        """
+        try:
+            service = get_profile_message_service()
+            watchers = service.get_watchers_list()
+
+            return jsonify({'success': True, 'data': watchers})
+        except Exception as e:
+            g.logger.error(f"Get watchers list failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/queue/toggle', methods=['POST'])
+    def toggle_watcher_selection():
+        """Toggle selection for specific watcher.
+
+        Expects JSON: {"username": "...", "selected": true/false}
+
+        Returns:
+            JSON with success status
+        """
+        try:
+            data = request.get_json() or {}
+            username = data.get('username', '').strip()
+            selected = data.get('selected', False)
+
+            if not username:
+                return jsonify({'success': False, 'error': 'Username is required'}), 400
+
+            service = get_profile_message_service()
+            result = service.update_watcher_selection(username, selected)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Toggle watcher selection failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/queue/select-all', methods=['POST'])
+    def select_all_watchers():
+        """Select all watchers in queue.
+
+        Returns:
+            JSON with selected count
+        """
+        try:
+            service = get_profile_message_service()
+            result = service.select_all_watchers()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Select all watchers failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/queue/deselect-all', methods=['POST'])
+    def deselect_all_watchers():
+        """Deselect all watchers in queue.
+
+        Returns:
+            JSON with deselected count
+        """
+        try:
+            service = get_profile_message_service()
+            result = service.deselect_all_watchers()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Deselect all watchers failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/logs', methods=['GET'])
+    def get_broadcast_logs():
+        """Get broadcast logs.
+
+        Query params:
+            message_id: Optional message ID filter
+            limit: Max results (default 100)
+            offset: Offset for pagination (default 0)
+
+        Returns:
+            JSON with log entries
+        """
+        try:
+            message_id = request.args.get('message_id')
+            limit = int(request.args.get('limit', 100))
+            offset = int(request.args.get('offset', 0))
+
+            service = get_profile_message_service()
+
+            if message_id:
+                logs = service.log_repo.get_logs_by_message_id(int(message_id), limit, offset)
+            else:
+                logs = service.log_repo.get_all_logs(limit, offset)
+
+            return jsonify({'success': True, 'data': [
+                {
+                    'log_id': log.log_id,
+                    'message_id': log.message_id,
+                    'recipient_username': log.recipient_username,
+                    'recipient_userid': log.recipient_userid,
+                    'commentid': log.commentid,
+                    'status': log.status.value,
+                    'error_message': log.error_message,
+                    'sent_at': log.sent_at.isoformat() if log.sent_at else None,
+                    'profile_url': f"https://www.deviantart.com/{log.recipient_username}",
+                }
+                for log in logs
+            ]})
+        except Exception as e:
+            g.logger.error(f"Get logs failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
 
     # ========== UPLOAD ADMIN THUMBNAIL ROUTE ==========
