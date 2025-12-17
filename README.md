@@ -62,7 +62,7 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 ![DeviantArt-Stats-Dashboard-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Stats-Dashboard-12-09-2025_09_54_AM.png)
 ![Statistics-Charts-DeviantArt-Dashboard-12-09-2025_09_54_AM.png](doc/img/Statistics-Charts-DeviantArt-Dashboard-12-09-2025_09_54_AM.png)
 ![DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png)
-
+![Screenshot 2025-12-17 060642.png](doc/img/Screenshot%202025-12-17%20060642.png)
 </details>
 
 ---------
