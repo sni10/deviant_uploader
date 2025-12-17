@@ -4,6 +4,8 @@
   let currentEditingMessageId = null;
   let messageModal = null;
 
+  let savedWatchers = [];
+
   function setStatus(message, type = "info") {
     const el = document.getElementById("status");
     if (!el) return;
@@ -45,6 +47,12 @@
         // Update watchers list if worker is running
         if (json.data.running) {
           await loadWatchersList();
+        }
+
+        // If the worker stopped naturally, stop polling to avoid endless requests.
+        if (statusInterval && !json.data.running) {
+          clearInterval(statusInterval);
+          statusInterval = null;
         }
       }
     } catch (e) {
@@ -201,6 +209,180 @@
       await loadMessages();
     } catch (e) {
       setStatus("Failed to delete message: " + e.message, "error");
+    }
+  };
+
+  function formatFetchedAt(value) {
+    if (!value) return "-";
+    const dt = new Date(value);
+    if (!Number.isNaN(dt.getTime())) {
+      return dt.toLocaleString();
+    }
+
+    const normalized = typeof value === "string" ? value.replace(" ", "T") : value;
+    const dt2 = new Date(normalized);
+    if (!Number.isNaN(dt2.getTime())) {
+      return dt2.toLocaleString();
+    }
+
+    return String(value);
+  }
+
+  function renderSavedWatchersTable() {
+    const tbody = document.getElementById("saved-watchers-table-body");
+    if (!tbody) return;
+
+    if (!savedWatchers || savedWatchers.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="5" class="text-center text-muted">No saved watchers</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = savedWatchers
+      .map(
+        (w, index) => `
+      <tr>
+        <td class="text-muted">${index + 1}</td>
+        <td>
+          <input type="checkbox" class="form-check-input"
+            ${w.selected ? "checked" : ""}
+            onchange="toggleSavedWatcherByIndex(${index}, this.checked)">
+        </td>
+        <td>${escapeHtml(w.username)}</td>
+        <td>${escapeHtml(w.userid)}</td>
+        <td>${formatFetchedAt(w.fetched_at)}</td>
+      </tr>
+    `
+      )
+      .join("");
+  }
+
+  window.loadSavedWatchers = async function () {
+    try {
+      const resp = await fetch("/api/profile-messages/watchers/saved?limit=500");
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const watchers = json.data || [];
+
+      const prevSelected = new Set(
+        (savedWatchers || []).filter((w) => w.selected).map((w) => w.username)
+      );
+
+      savedWatchers = watchers.map((w) => ({
+        ...w,
+        selected: prevSelected.has(w.username),
+      }));
+
+      renderSavedWatchersTable();
+    } catch (e) {
+      console.error("Failed to load saved watchers:", e);
+    }
+  };
+
+  window.toggleSavedWatcherByIndex = function (index, selected) {
+    const w = savedWatchers?.[index];
+    if (!w) return;
+    w.selected = !!selected;
+  };
+
+  window.selectAllSavedWatchers = function () {
+    savedWatchers = (savedWatchers || []).map((w) => ({ ...w, selected: true }));
+    renderSavedWatchersTable();
+  };
+
+  window.deselectAllSavedWatchers = function () {
+    savedWatchers = (savedWatchers || []).map((w) => ({ ...w, selected: false }));
+    renderSavedWatchersTable();
+  };
+
+  window.addSelectedSavedToQueue = async function () {
+    const selected = (savedWatchers || [])
+      .filter((w) => w.selected)
+      .map((w) => ({ username: w.username, userid: w.userid }));
+
+    if (selected.length === 0) {
+      setStatus("No saved watchers selected", "error");
+      return;
+    }
+
+    try {
+      const resp = await fetch(
+        "/api/profile-messages/watchers/add-selected-to-queue",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ watchers: selected }),
+        }
+      );
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const msg = `Added ${json.added_count} watchers to queue (${json.skipped_count} skipped, ${json.invalid_count} invalid)`;
+      setStatus(msg, "success");
+      await loadWatchersList();
+      await fetchStatus();
+    } catch (e) {
+      setStatus("Failed to add selected to queue: " + e.message, "error");
+    }
+  };
+
+  window.saveWatcherToDb = async function (username, userid) {
+    try {
+      const resp = await fetch("/api/profile-messages/watchers/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, userid }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.message || json.error);
+
+      setStatus(json.message, "success");
+      await loadSavedWatchers();
+    } catch (e) {
+      setStatus("Failed to save watcher: " + e.message, "error");
+    }
+  };
+
+  window.saveSelectedToDb = async function () {
+    try {
+      const resp = await fetch("/api/profile-messages/watchers/save-selected", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const msg = `Saved ${json.saved_count} selected watchers to database (${json.skipped_count} not selected, ${json.failed_count} failed)`;
+      setStatus(msg, "success");
+      await loadSavedWatchers();
+    } catch (e) {
+      setStatus("Failed to save watchers: " + e.message, "error");
+    }
+  };
+
+  window.removeSelectedFromQueue = async function () {
+    if (!confirm("Remove selected watchers from queue?")) return;
+
+    try {
+      const resp = await fetch("/api/profile-messages/queue/remove-selected", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.message || json.error);
+
+      setStatus(
+        `Removed ${json.removed_count} watchers from queue (${json.remaining_count} remaining)`,
+        "success",
+      );
+      await loadWatchersList();
+      await fetchStatus();
+    } catch (e) {
+      setStatus("Failed to remove selected: " + e.message, "error");
     }
   };
 
@@ -447,7 +629,8 @@
 
     await loadMessages();
     await fetchStatus();
-    await loadWatchersList();
+    await loadSavedWatchers(); // Load saved watchers from DB
+    await loadWatchersList(); // Load current queue
     await loadLogs();
 
     // Start polling if worker is running

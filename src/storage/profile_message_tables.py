@@ -17,6 +17,15 @@ from sqlalchemy import (
 
 metadata = MetaData()
 
+watchers = Table(
+    "watchers",
+    metadata,
+    Column("watcher_id", Integer, primary_key=True, autoincrement=True),
+    Column("username", String(100), nullable=False, unique=True),
+    Column("userid", String(100), nullable=False),
+    Column("fetched_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+
 profile_messages = Table(
     "profile_messages",
     metadata,
@@ -43,6 +52,7 @@ profile_message_logs = Table(
 )
 
 # Indexes for efficient queries
+Index("idx_watchers_username", watchers.c.username)
 Index("idx_profile_message_logs_message_id", profile_message_logs.c.message_id)
 Index("idx_profile_message_logs_status", profile_message_logs.c.status)
 Index("idx_profile_message_logs_recipient", profile_message_logs.c.recipient_username)
