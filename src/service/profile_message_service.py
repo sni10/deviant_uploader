@@ -10,6 +10,7 @@ import requests
 
 from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
+from ..storage.watcher_repository import WatcherRepository
 from ..domain.models import MessageLogStatus
 
 
@@ -23,10 +24,12 @@ class ProfileMessageService:
         self,
         message_repo: ProfileMessageRepository,
         log_repo: ProfileMessageLogRepository,
+        watcher_repo: WatcherRepository,
         logger: Logger,
     ) -> None:
         self.message_repo = message_repo
         self.log_repo = log_repo
+        self.watcher_repo = watcher_repo
         self.logger = logger
 
         # Worker state
@@ -91,12 +94,23 @@ class ProfileMessageService:
             results = data.get("results", [])
             for watcher in results:
                 user = watcher.get("user", {})
-                watchers_list.append({
-                    "username": user.get("username"),
-                    "userid": user.get("userid"),
-                    "selected": True,  # Selected by default
-                })
-                watchers_fetched += 1
+                username = user.get("username")
+                userid = user.get("userid")
+
+                if username and userid:
+                    watchers_list.append({
+                        "username": username,
+                        "userid": userid,
+                        "selected": True,  # Selected by default
+                    })
+
+                    # Save to database
+                    try:
+                        self.watcher_repo.add_or_update_watcher(username, userid)
+                    except Exception as e:
+                        self.logger.warning("Failed to save watcher %s: %s", username, e)
+
+                    watchers_fetched += 1
 
                 if watchers_fetched >= max_watchers:
                     break

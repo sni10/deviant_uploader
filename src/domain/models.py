@@ -269,3 +269,15 @@ class ProfileMessageLog:
     # Metadata
     log_id: Optional[int] = None
     sent_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class Watcher:
+    """Represents a DeviantArt watcher (follower)."""
+
+    username: str
+    userid: str
+
+    # Metadata
+    watcher_id: Optional[int] = None
+    fetched_at: datetime = field(default_factory=datetime.now)

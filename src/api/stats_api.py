@@ -35,6 +35,7 @@ from ..storage.preset_repository import PresetRepository
 from ..storage.feed_deviation_repository import FeedDeviationRepository
 from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
+from ..storage.watcher_repository import WatcherRepository
 from ..service.auth_service import AuthService
 from ..service.stats_service import StatsService
 from ..service.uploader import UploaderService
@@ -185,10 +186,12 @@ def get_profile_message_service():
         # Create dedicated connections for the worker (not tied to request lifecycle)
         worker_conn1 = get_connection()
         worker_conn2 = get_connection()
+        worker_conn3 = get_connection()
         message_repo = ProfileMessageRepository(worker_conn1)
         log_repo = ProfileMessageLogRepository(worker_conn2)
+        watcher_repo = WatcherRepository(worker_conn3)
         logger = current_app.config['APP_LOGGER']
-        profile_message_service = ProfileMessageService(message_repo, log_repo, logger)
+        profile_message_service = ProfileMessageService(message_repo, log_repo, watcher_repo, logger)
         current_app.config['PROFILE_MESSAGE_SERVICE'] = profile_message_service
 
     return current_app.config['PROFILE_MESSAGE_SERVICE']
@@ -1268,6 +1271,34 @@ def create_app(config: Config = None) -> Flask:
             ]})
         except Exception as e:
             g.logger.error(f"Get logs failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/profile-messages/watchers/saved', methods=['GET'])
+    def get_saved_watchers():
+        """Get watchers from database.
+
+        Query params:
+            limit: Max results (default 1000)
+
+        Returns:
+            JSON with watchers list
+        """
+        try:
+            limit = int(request.args.get('limit', 1000))
+
+            service = get_profile_message_service()
+            watchers = service.watcher_repo.get_all_watchers(limit)
+
+            return jsonify({'success': True, 'data': [
+                {
+                    'username': w.username,
+                    'userid': w.userid,
+                    'fetched_at': w.fetched_at.isoformat() if w.fetched_at else None,
+                }
+                for w in watchers
+            ]})
+        except Exception as e:
+            g.logger.error(f"Get saved watchers failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
 
     # ========== UPLOAD ADMIN THUMBNAIL ROUTE ==========

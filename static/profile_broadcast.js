@@ -204,6 +204,49 @@
     }
   };
 
+  async function loadSavedWatchers() {
+    try {
+      const resp = await fetch("/api/profile-messages/watchers/saved?limit=500");
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const watchers = json.data || [];
+      const tbody = document.getElementById("saved-watchers-table-body");
+
+      if (watchers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No saved watchers</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = watchers
+        .map(
+          (w, index) => `
+        <tr>
+          <td class="text-muted">${index + 1}</td>
+          <td>${escapeHtml(w.username)}</td>
+          <td>${escapeHtml(w.userid)}</td>
+          <td>${w.fetched_at ? new Date(w.fetched_at).toLocaleString() : "-"}</td>
+          <td>
+            <button class="btn btn-sm btn-primary" onclick="loadWatcherToQueue('${escapeHtml(w.username)}', '${escapeHtml(w.userid)}')">
+              Load
+            </button>
+          </td>
+        </tr>
+      `
+        )
+        .join("");
+    } catch (e) {
+      console.error("Failed to load saved watchers:", e);
+    }
+  }
+
+  window.loadWatcherToQueue = async function (username, userid) {
+    // This will add watcher to the in-memory queue by calling fetch with that specific user
+    // For now, just show a message - we need a backend endpoint to add individual watchers
+    setStatus(`Feature coming soon: Load ${username} to queue`, "info");
+  };
+
   async function loadWatchersList() {
     try {
       const resp = await fetch("/api/profile-messages/queue/list");
@@ -447,7 +490,8 @@
 
     await loadMessages();
     await fetchStatus();
-    await loadWatchersList();
+    await loadSavedWatchers(); // Load saved watchers from DB
+    await loadWatchersList(); // Load current queue
     await loadLogs();
 
     // Start polling if worker is running
