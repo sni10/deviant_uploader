@@ -42,6 +42,10 @@
       const json = await resp.json();
       if (json.success) {
         updateStats(json.data);
+        // Update watchers list if worker is running
+        if (json.data.running) {
+          await loadWatchersList();
+        }
       }
     } catch (e) {
       console.error("Failed to fetch status:", e);
@@ -200,6 +204,94 @@
     }
   };
 
+  async function loadWatchersList() {
+    try {
+      const resp = await fetch("/api/profile-messages/queue/list");
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const watchers = json.data || [];
+      const tbody = document.getElementById("watchers-table-body");
+
+      if (watchers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No watchers in queue</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = watchers
+        .map(
+          (w, index) => `
+        <tr>
+          <td class="text-muted">${index + 1}</td>
+          <td>
+            <input type="checkbox" class="form-check-input"
+              ${w.selected ? "checked" : ""}
+              onchange="toggleWatcher('${escapeHtml(w.username)}', this.checked)">
+          </td>
+          <td>${escapeHtml(w.username)}</td>
+          <td>${escapeHtml(w.userid)}</td>
+        </tr>
+      `
+        )
+        .join("");
+    } catch (e) {
+      console.error("Failed to load watchers list:", e);
+    }
+  }
+
+  window.toggleWatcher = async function (username, selected) {
+    try {
+      const resp = await fetch("/api/profile-messages/queue/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, selected }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.message || json.error);
+
+      await fetchStatus();
+    } catch (e) {
+      setStatus("Failed to toggle selection: " + e.message, "error");
+      await loadWatchersList(); // Reload to restore state
+    }
+  };
+
+  window.selectAllWatchers = async function () {
+    try {
+      const resp = await fetch("/api/profile-messages/queue/select-all", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      setStatus(`Selected ${json.selected_count} watchers`, "success");
+      await loadWatchersList();
+      await fetchStatus();
+    } catch (e) {
+      setStatus("Failed to select all: " + e.message, "error");
+    }
+  };
+
+  window.deselectAllWatchers = async function () {
+    try {
+      const resp = await fetch("/api/profile-messages/queue/deselect-all", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      setStatus(`Deselected ${json.deselected_count} watchers`, "success");
+      await loadWatchersList();
+      await fetchStatus();
+    } catch (e) {
+      setStatus("Failed to deselect all: " + e.message, "error");
+    }
+  };
+
   window.fetchWatchers = async function () {
     const username = document.getElementById("username-input").value.trim();
     const maxWatchers = parseInt(document.getElementById("max-watchers-input").value, 10);
@@ -230,6 +322,7 @@
       const msg = `Fetched ${result.watchers_count} watchers${result.has_more ? " (more available)" : ""}`;
       setStatus(msg, "success");
       await fetchStatus();
+      await loadWatchersList(); // Load the list after fetching
     } catch (e) {
       setStatus("Failed to fetch watchers: " + e.message, "error");
     }
@@ -248,6 +341,7 @@
 
       setStatus(`Cleared ${json.cleared_count} watchers from queue`, "success");
       await fetchStatus();
+      await loadWatchersList();
     } catch (e) {
       setStatus("Failed to clear queue: " + e.message, "error");
     }
@@ -353,6 +447,7 @@
 
     await loadMessages();
     await fetchStatus();
+    await loadWatchersList();
     await loadLogs();
 
     // Start polling if worker is running
