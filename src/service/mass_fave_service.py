@@ -193,6 +193,20 @@ class MassFaveService:
                 "queue_stats": queue_stats,
             }
 
+    def reset_failed_deviations(self) -> dict:
+        """Reset all failed deviations back to pending status.
+
+        Returns:
+            Dictionary with reset count: {success, reset_count}
+        """
+        try:
+            reset_count = self.repo.reset_failed_to_pending()
+            self.logger.info("Reset %d failed deviations to pending", reset_count)
+            return {"success": True, "reset_count": reset_count}
+        except Exception as e:
+            self.logger.error("Failed to reset deviations: %s", e)
+            return {"success": False, "error": str(e)}
+
     def _worker_loop(self, access_token: str) -> None:
         """Background worker loop (runs in separate thread)."""
         self.logger.info("Worker loop started")

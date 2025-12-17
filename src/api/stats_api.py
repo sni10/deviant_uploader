@@ -890,6 +890,23 @@ def create_app(config: Config = None) -> Flask:
             g.logger.error(f"Get worker status failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
 
+    @app.route('/api/mass-fave/reset-failed', methods=['POST'])
+    def reset_failed_deviations():
+        """
+        Reset all failed deviations back to pending status.
+
+        Returns:
+            JSON with reset count
+        """
+        try:
+            mass_fave_service = get_mass_fave_service()
+            result = mass_fave_service.reset_failed_deviations()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Reset failed deviations failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     # ========== UPLOAD ADMIN THUMBNAIL ROUTE ==========
 
     @app.route('/api/admin/thumbnail/<int:deviation_id>')

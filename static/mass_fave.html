@@ -104,9 +104,10 @@
                 <h5 class="mb-0">Worker Control</h5>
             </div>
             <div class="card-body">
-                <div class="d-flex gap-2">
+                <div class="d-flex gap-2 mb-3">
                     <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Worker</button>
                     <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Worker</button>
+                    <button id="btn-reset-failed" class="btn btn-warning" onclick="resetFailedDeviations()">Reset Failed</button>
                 </div>
                 <div class="mt-3">
                     <span class="badge bg-secondary" id="worker-status">Stopped</span>

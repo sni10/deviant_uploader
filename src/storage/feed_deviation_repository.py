@@ -262,3 +262,27 @@ class FeedDeviationRepository(BaseRepository):
         if hasattr(result, 'rowcount'):
             return result.rowcount
         return 0
+
+    def reset_failed_to_pending(self) -> int:
+        """Reset all failed deviations back to pending status.
+
+        Returns:
+            Number of reset rows
+        """
+        stmt = (
+            update(feed_deviations)
+            .where(feed_deviations.c.status == "failed")
+            .values(
+                status="pending",
+                attempts=0,
+                last_error=None,
+                updated_at=func.current_timestamp(),
+            )
+        )
+        result = self._execute_core(stmt)
+        self.conn.commit()
+
+        # Get rowcount
+        if hasattr(result, 'rowcount'):
+            return result.rowcount
+        return 0
