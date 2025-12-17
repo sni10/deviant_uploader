@@ -32,9 +32,11 @@ from ..storage.stats_snapshot_repository import StatsSnapshotRepository
 from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
 from ..storage.deviation_metadata_repository import DeviationMetadataRepository
 from ..storage.preset_repository import PresetRepository
+from ..storage.feed_deviation_repository import FeedDeviationRepository
 from ..service.auth_service import AuthService
 from ..service.stats_service import StatsService
 from ..service.uploader import UploaderService
+from ..service.mass_fave_service import MassFaveService
 from ..domain.models import UploadPreset
 
 
@@ -112,18 +114,18 @@ def get_services():
 def get_upload_services():
     """
     Get or create upload-related services for the current request.
-    
+
     Services are created lazily and tied to the current request's repositories.
-    
+
     Returns:
         Tuple of (uploader_service, preset_repo, deviation_repo)
     """
     if 'upload_services' not in g:
         (user_repo, token_repo, gallery_repo, deviation_repo,
-         deviation_stats_repo, stats_snapshot_repo, 
+         deviation_stats_repo, stats_snapshot_repo,
          user_stats_snapshot_repo, deviation_metadata_repo) = get_repositories()
         logger = g.logger
-        
+
         preset_repo = PresetRepository(g.connection)
         auth_service = AuthService(token_repo, logger)
         uploader_service = UploaderService(
@@ -133,10 +135,34 @@ def get_upload_services():
             preset_repo,
             logger
         )
-        
+
         g.upload_services = (uploader_service, preset_repo, deviation_repo)
-    
+
     return g.upload_services
+
+
+def get_mass_fave_service():
+    """
+    Get or create mass fave service as application-level singleton.
+
+    The MassFaveService runs a background worker thread that must persist
+    beyond individual HTTP requests. Therefore, it uses its own dedicated
+    database connection that is NOT closed by teardown_db().
+
+    Returns:
+        MassFaveService instance (singleton per application)
+    """
+    from flask import current_app
+
+    if 'MASS_FAVE_SERVICE' not in current_app.config:
+        # Create dedicated connection for the worker (not tied to request lifecycle)
+        worker_connection = get_connection()
+        feed_deviation_repo = FeedDeviationRepository(worker_connection)
+        logger = current_app.config['APP_LOGGER']
+        mass_fave_service = MassFaveService(feed_deviation_repo, logger)
+        current_app.config['MASS_FAVE_SERVICE'] = mass_fave_service
+
+    return current_app.config['MASS_FAVE_SERVICE']
 
 
 def create_app(config: Config = None) -> Flask:
@@ -761,14 +787,119 @@ def create_app(config: Config = None) -> Flask:
             g.logger.error(f"Delete failed: {e}", exc_info=True)
             return jsonify({'success': False, 'error': str(e)}), 500
     
+    # ========== AUTO FAVE ROUTES ==========
+
+    @app.route('/mass_fave.html')
+    def mass_fave_page():
+        """Serve Auto Fave admin page."""
+        return send_from_directory(STATIC_DIR, "mass_fave.html")
+
+    @app.route('/api/mass-fave/collect', methods=['POST'])
+    def collect_feed():
+        """
+        Collect deviations from feed and add to queue.
+
+        Expects JSON: {"pages": 5}
+
+        Returns:
+            JSON with collection results
+        """
+        try:
+            data = request.get_json() or {}
+            pages = int(data.get('pages', 5))
+
+            if pages < 1 or pages > 20:
+                return jsonify({'success': False, 'error': 'Pages must be between 1 and 20'}), 400
+
+            auth_service, _ = get_services()
+
+            # Ensure authentication
+            if not auth_service.ensure_authenticated():
+                return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+            access_token = auth_service.get_valid_token()
+            if not access_token:
+                return jsonify({'success': False, 'error': 'Failed to obtain access token'}), 401
+
+            mass_fave_service = get_mass_fave_service()
+            result = mass_fave_service.collect_from_feed(access_token, pages)
+
+            return jsonify({'success': True, 'data': result})
+        except Exception as e:
+            g.logger.error(f"Feed collection failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/mass-fave/worker/start', methods=['POST'])
+    def start_worker():
+        """
+        Start background worker to process fave queue.
+
+        Returns:
+            JSON with start status
+        """
+        try:
+            auth_service, _ = get_services()
+
+            # Ensure authentication
+            if not auth_service.ensure_authenticated():
+                return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+            access_token = auth_service.get_valid_token()
+            if not access_token:
+                return jsonify({'success': False, 'error': 'Failed to obtain access token'}), 401
+
+            mass_fave_service = get_mass_fave_service()
+            result = mass_fave_service.start_worker(access_token)
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Worker start failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/mass-fave/worker/stop', methods=['POST'])
+    def stop_worker():
+        """
+        Stop background worker.
+
+        Returns:
+            JSON with stop status
+        """
+        try:
+            mass_fave_service = get_mass_fave_service()
+            result = mass_fave_service.stop_worker()
+
+            return jsonify(result)
+        except Exception as e:
+            g.logger.error(f"Worker stop failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/mass-fave/status', methods=['GET'])
+    def get_worker_status():
+        """
+        Get worker and queue status.
+
+        Returns:
+            JSON with status information
+        """
+        try:
+            mass_fave_service = get_mass_fave_service()
+            status = mass_fave_service.get_worker_status()
+
+            return jsonify({'success': True, 'data': status})
+        except Exception as e:
+            g.logger.error(f"Get worker status failed: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    # ========== UPLOAD ADMIN THUMBNAIL ROUTE ==========
+
     @app.route('/api/admin/thumbnail/<int:deviation_id>')
     def get_thumbnail(deviation_id):
         """
         Get thumbnail for deviation (serves the image file).
-        
+
         Args:
             deviation_id: Deviation database ID
-            
+
         Returns:
             Image file or error
         """

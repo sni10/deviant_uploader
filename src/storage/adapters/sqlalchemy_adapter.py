@@ -7,6 +7,7 @@ from sqlalchemy.pool import NullPool
 
 from ..base_repository import DBConnection
 from ..models import Base
+from ..feed_tables import metadata as feed_metadata
 
 
 class SQLAlchemyConnection:
@@ -86,13 +87,16 @@ class SQLAlchemyAdapter:
     
     def initialize(self) -> None:
         """Initialize database schema and run migrations.
-        
+
         This method creates all tables defined in the SQLAlchemy models.
         For production use with migrations, this should be replaced with
         Alembic migration logic.
         """
-        # Create all tables defined in models
+        # Create all tables defined in ORM models
         Base.metadata.create_all(self.engine)
+
+        # Create all tables defined in Core metadata (feed tables)
+        feed_metadata.create_all(self.engine)
     
     def get_connection(self) -> DBConnection:
         """Create and return a new SQLAlchemy session wrapped as DBConnection.

@@ -134,6 +134,17 @@ class StatsService:
 
                     if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
                         attempts += 1
+
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                                delay = min(delay, 60.0)  # Cap at 60 seconds
+                            except ValueError:
+                                # If not a number, use exponential backoff
+                                pass
+
                         self.logger.warning(
                             "Gallery fetch rate-limited for folder %s at offset %s "
                             "(attempt %s/%s), backing off for %.1f seconds.",
@@ -246,6 +257,17 @@ class StatsService:
 
                     if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
                         attempts += 1
+
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                                delay = min(delay, 60.0)  # Cap at 60 seconds
+                            except ValueError:
+                                # If not a number, use exponential backoff
+                                pass
+
                         self.logger.warning(
                             "Metadata fetch rate-limited for batch starting at %d "
                             "(attempt %d/%d), backing off for %.1f seconds.",
@@ -352,6 +374,17 @@ class StatsService:
 
                     if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
                         attempts += 1
+
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                                delay = min(delay, 60.0)  # Cap at 60 seconds
+                            except ValueError:
+                                # If not a number, use exponential backoff
+                                pass
+
                         self.logger.warning(
                             "Deviation fetch rate-limited for %s (attempt %s/%s), "
                             "backing off for %.1f seconds.",
@@ -434,12 +467,47 @@ class StatsService:
 
         self.logger.info("Fetching user profile for snapshot: %s", username)
 
-        try:
-            resp = requests.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            self.logger.error("Failed to fetch user profile %s: %s", username, exc)
-            return None
+        attempts = 0
+        delay = self.RATE_LIMIT_INITIAL_DELAY
+
+        while True:
+            try:
+                resp = requests.get(url, params=params, timeout=30)
+                resp.raise_for_status()
+                break
+            except requests.HTTPError as exc:  # noqa: BLE001
+                is_rate_limited = self._is_rate_limited_response(resp)
+
+                if is_rate_limited and attempts < self.RATE_LIMIT_MAX_RETRIES:
+                    attempts += 1
+
+                    # Check for Retry-After header
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = float(retry_after)
+                            delay = min(delay, 60.0)  # Cap at 60 seconds
+                        except ValueError:
+                            # If not a number, use exponential backoff
+                            pass
+
+                    self.logger.warning(
+                        "User profile fetch rate-limited for %s (attempt %s/%s), "
+                        "backing off for %.1f seconds.",
+                        username,
+                        attempts,
+                        self.RATE_LIMIT_MAX_RETRIES,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+
+                self.logger.error("Failed to fetch user profile %s: %s", username, exc)
+                return None
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to fetch user profile %s: %s", username, exc)
+                return None
 
         try:
             payload = resp.json()
@@ -582,24 +650,49 @@ class StatsService:
                 stats.get("comments", 0),
             )
 
+            # Save current absolute stats
+            current_views = stats.get("views", 0)
+            current_favourites = stats.get("favourites", 0)
+            current_comments = stats.get("comments", 0)
+
             self.deviation_stats_repo.save_deviation_stats(
                 deviationid=deviationid,
                 title=basic.get("title") or meta.get("title") or "Untitled",
-                views=stats.get("views", 0),
-                favourites=stats.get("favourites", 0),
-                comments=stats.get("comments", 0),
+                views=current_views,
+                favourites=current_favourites,
+                comments=current_comments,
                 thumb_url=basic.get("thumb_url"),
                 gallery_folderid=folderid,
                 is_mature=is_mature,
                 url=basic.get("url"),
             )
 
+            # Calculate delta: current absolute - cumulative sum of all previous deltas
+            # Get all snapshots before today to calculate cumulative baseline
+            all_snapshots = self.stats_snapshot_repo.get_snapshots_for_deviation(
+                deviationid, limit=10000
+            )
+            previous_cumulative_views = sum(
+                s["views"] for s in all_snapshots if s["snapshot_date"] < today
+            )
+            previous_cumulative_favourites = sum(
+                s["favourites"] for s in all_snapshots if s["snapshot_date"] < today
+            )
+            previous_cumulative_comments = sum(
+                s["comments"] for s in all_snapshots if s["snapshot_date"] < today
+            )
+
+            views_delta = current_views - previous_cumulative_views
+            favourites_delta = current_favourites - previous_cumulative_favourites
+            comments_delta = current_comments - previous_cumulative_comments
+
+            # Save daily delta (not absolute values)
             self.stats_snapshot_repo.save_snapshot(
                 deviationid=deviationid,
                 snapshot_date=today,
-                views=stats.get("views", 0),
-                favourites=stats.get("favourites", 0),
-                comments=stats.get("comments", 0),
+                views=views_delta,
+                favourites=favourites_delta,
+                comments=comments_delta,
             )
 
             self.deviation_metadata_repo.save_metadata(
@@ -651,13 +744,17 @@ class StatsService:
         }
 
     def get_stats_with_diff(self) -> list[dict]:
-        """Return current stats with deltas vs yesterday."""
+        """Return current stats with deltas vs yesterday.
 
+        Note: stats_snapshots now store daily deltas (not cumulative values).
+        The 'yesterday_views' field from the join is already a delta.
+        """
         stats = self.deviation_stats_repo.get_all_stats_with_previous()
         for row in stats:
-            row["views_diff"] = row["views"] - row["yesterday_views"]
-            row["favourites_diff"] = row["favourites"] - row["yesterday_favourites"]
-            row["comments_diff"] = row["comments"] - row["yesterday_comments"]
+            # yesterday_* fields now contain deltas, not cumulative values
+            row["views_diff"] = row["yesterday_views"]
+            row["favourites_diff"] = row["yesterday_favourites"]
+            row["comments_diff"] = row["yesterday_comments"]
             # Use stored URL from DB; fall back to constructed URL if missing
             if not row.get("url"):
                 row["url"] = self._build_deviation_url(row)

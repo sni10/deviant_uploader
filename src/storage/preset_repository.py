@@ -265,9 +265,18 @@ class PresetRepository(BaseRepository):
         Returns:
             UploadPreset object
         """
-        # Parse JSON fields
-        tags = json.loads(row[6]) if row[6] else []
-        mature_classification = json.loads(row[12]) if row[12] else []
+        # Parse JSON fields - handle None, empty strings, and invalid JSON
+        tags_str = (row[7] or "").strip()
+        try:
+            tags = json.loads(tags_str) if tags_str else []
+        except json.JSONDecodeError:
+            tags = []
+        
+        mature_class_str = (row[13] or "").strip()
+        try:
+            mature_classification = json.loads(mature_class_str) if mature_class_str else []
+        except json.JSONDecodeError:
+            mature_classification = []
         
         return UploadPreset(
             name=row[1],
@@ -275,13 +284,13 @@ class PresetRepository(BaseRepository):
             base_title=row[3],
             title_increment_start=row[4],
             last_used_increment=row[5],
-            artist_comments=row[7],
+            artist_comments=row[6],
             tags=tags,
             is_ai_generated=bool(row[8]),
             noai=bool(row[9]),
             is_dirty=bool(row[10]),
             is_mature=bool(row[11]),
-            mature_level=row[13],
+            mature_level=row[12],
             mature_classification=mature_classification,
             feature=bool(row[14]),
             allow_comments=bool(row[15]),

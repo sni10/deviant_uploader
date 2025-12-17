@@ -58,12 +58,18 @@ def _build_service() -> StatsService:
 class _FakeResponse:
     """Simple stand-in for ``requests.Response`` for testing purposes."""
 
-    def __init__(self, status_code: int, payload: Any) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        payload: Any,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         # ``text`` is used only for logging in our code under test.
         self.text = str(payload)
         self.reason = ""
+        self.headers = headers or {}
 
     def json(self) -> Any:  # noqa: D401
         """Return prepared JSON-like payload."""

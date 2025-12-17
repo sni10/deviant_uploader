@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Fave - DeviantArt Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <style>
+        body { background-color: #f8f9fa; }
+        .stat-card { border-left: 4px solid #0d6efd; }
+        .stat-value { font-size: 2rem; font-weight: bold; }
+        .stat-label { color: #6c757d; font-size: 0.875rem; text-transform: uppercase; }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-3">
+        <div class="container py-4">
+            <a class="navbar-brand" href="/static/stats.html">DeviantArt Dashboard</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navMain">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/stats.html">Stats</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/charts.html">Charts</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/upload_admin.html">Upload Admin</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="/mass_fave.html">Auto Fave</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <h1 class="h3 mb-4">Auto Fave</h1>
+
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card stat-card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Pending</div>
+                        <div class="stat-value text-primary" id="stat-pending">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Faved</div>
+                        <div class="stat-value text-success" id="stat-faved">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Failed</div>
+                        <div class="stat-value text-danger" id="stat-failed">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="stat-label">Processed</div>
+                        <div class="stat-value text-info" id="stat-processed">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Feed Collector</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-12">
+                        <label for="pages-input" class="form-label small text-muted mb-1">Number of Pages</label>
+                        <div class="row g-8 align-items-end">
+                        <div class="col-md-4">
+                            <input type="number" id="pages-input" class="form-control" value="5" min="1" max="20">
+                        </div>
+                        <div class="col-md-8">
+                            <button class="btn btn-primary" onclick="collectFeed()">Collect New Deviations</button>
+                        </div>
+                        </div>
+                        <small class="form-text text-muted">Each page contains up to 50 deviations</small>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Worker Control</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex gap-2">
+                    <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Worker</button>
+                    <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Worker</button>
+                </div>
+                <div class="mt-3">
+                    <span class="badge bg-secondary" id="worker-status">Stopped</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="alert alert-secondary py-2 mb-3" role="alert">Ready.</div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Activity Log</h5>
+            </div>
+            <div class="card-body">
+                <div id="log" style="max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.875rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+    <script src="/static/mass_fave.js"></script>
+</body>
+</html>
