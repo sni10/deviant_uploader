@@ -48,6 +48,12 @@
         if (json.data.running) {
           await loadWatchersList();
         }
+
+        // If the worker stopped naturally, stop polling to avoid endless requests.
+        if (statusInterval && !json.data.running) {
+          clearInterval(statusInterval);
+          statusInterval = null;
+        }
       }
     } catch (e) {
       console.error("Failed to fetch status:", e);

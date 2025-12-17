@@ -144,6 +144,10 @@ class ProfileMessageService:
 
     # ========== Worker ==========
 
+    def _is_worker_alive(self) -> bool:
+        """Return True if the background worker thread is alive."""
+        return bool(self._worker_thread and self._worker_thread.is_alive())
+
     def start_worker(self, access_token: str, message_id: int) -> dict:
         """Start background worker thread.
 
@@ -154,8 +158,11 @@ class ProfileMessageService:
         Returns:
             Status dictionary: {success, message}
         """
-        if self._worker_running:
+        if self._is_worker_alive():
             return {"success": False, "message": "Worker already running"}
+
+        # Reset stale flag if the thread is not alive.
+        self._worker_running = False
 
         # Check if queue has watchers
         with self._queue_lock:
@@ -191,14 +198,21 @@ class ProfileMessageService:
         Returns:
             Status dictionary: {success, message}
         """
-        if not self._worker_running:
+        if not self._is_worker_alive():
+            self._worker_running = False
             return {"success": False, "message": "Worker not running"}
 
         self._stop_flag.set()
         if self._worker_thread:
             self._worker_thread.join(timeout=10)
 
-        self._worker_running = False
+        still_alive = self._is_worker_alive()
+        self._worker_running = still_alive
+
+        if still_alive:
+            self.logger.warning("Worker stop requested but thread is still running")
+            return {"success": True, "message": "Stop requested"}
+
         self.logger.info("Worker thread stopped")
         return {"success": True, "message": "Worker stopped"}
 
@@ -208,14 +222,19 @@ class ProfileMessageService:
         Returns:
             Dictionary with: {running, processed, errors, last_error, queue_remaining, send_stats}
         """
+        running = self._is_worker_alive()
+        if not running:
+            # Keep internal flag in sync for callers that still rely on it.
+            self._worker_running = False
+
         with self._queue_lock:
-            queue_remaining = len(self._watchers_queue)
+            queue_remaining = sum(1 for w in self._watchers_queue if w.get("selected", False))
 
         send_stats = self.log_repo.get_stats()
 
         with self._stats_lock:
             return {
-                "running": self._worker_running,
+                "running": running,
                 "processed": self._worker_stats["processed"],
                 "errors": self._worker_stats["errors"],
                 "last_error": self._worker_stats["last_error"],
@@ -519,85 +538,110 @@ class ProfileMessageService:
     def _worker_loop(self, access_token: str, message_id: int, message_body: str) -> None:
         """Background worker loop (runs in separate thread)."""
         self.logger.info("Worker loop started for message_id=%s", message_id)
+        try:
+            while not self._stop_flag.is_set():
+                # Get next selected watcher from queue
+                with self._queue_lock:
+                    # Find first selected watcher
+                    selected_watcher = None
+                    for i, w in enumerate(self._watchers_queue):
+                        if w.get("selected", False):
+                            selected_watcher = self._watchers_queue.pop(i)
+                            break
 
-        while not self._stop_flag.is_set():
-            # Get next selected watcher from queue
-            with self._queue_lock:
-                # Find first selected watcher
-                selected_watcher = None
-                for i, w in enumerate(self._watchers_queue):
-                    if w.get("selected", False):
-                        selected_watcher = self._watchers_queue.pop(i)
+                    if not selected_watcher:
+                        # No more selected watchers, stop worker
+                        self.logger.info("No more selected watchers, stopping worker")
                         break
 
-                if not selected_watcher:
-                    # No more selected watchers, stop worker
-                    self.logger.info("No more selected watchers, stopping worker")
-                    break
+                    watcher = selected_watcher
 
-                watcher = selected_watcher
+                username = watcher.get("username")
+                userid = watcher.get("userid")
 
-            username = watcher.get("username")
-            userid = watcher.get("userid")
+                if not username or not userid:
+                    self.logger.warning("Invalid watcher data: %s", watcher)
+                    continue
 
-            if not username or not userid:
-                self.logger.warning("Invalid watcher data: %s", watcher)
-                continue
-
-            try:
-                # Post comment to profile
-                url = self.PROFILE_COMMENT_URL.format(username=username)
-                response = requests.post(
-                    url,
-                    data={"body": message_body, "access_token": access_token},
-                    timeout=30,
-                )
-
-                if response.status_code == 200:
-                    # Success
-                    response_data = response.json()
-                    commentid = response_data.get("commentid")
-
-                    self.log_repo.add_log(
-                        message_id=message_id,
-                        recipient_username=username,
-                        recipient_userid=userid,
-                        status=MessageLogStatus.SENT,
-                        commentid=commentid,
+                try:
+                    # Post comment to profile
+                    url = self.PROFILE_COMMENT_URL.format(username=username)
+                    response = requests.post(
+                        url,
+                        data={"body": message_body, "access_token": access_token},
+                        timeout=30,
                     )
 
-                    with self._stats_lock:
-                        self._worker_stats["processed"] += 1
+                    if response.status_code == 200:
+                        # Success
+                        response_data = response.json()
+                        commentid = response_data.get("commentid")
 
-                    self.logger.info("Sent comment to %s (commentid=%s)", username, commentid)
+                        self.log_repo.add_log(
+                            message_id=message_id,
+                            recipient_username=username,
+                            recipient_userid=userid,
+                            status=MessageLogStatus.SENT,
+                            commentid=commentid,
+                        )
 
-                    # Random delay to avoid rate limiting
-                    time.sleep(random.uniform(3, 8))
+                        with self._stats_lock:
+                            self._worker_stats["processed"] += 1
 
-                elif response.status_code == 429:
-                    # Rate limited - check Retry-After header
-                    retry_after = response.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            delay = int(retry_after)
-                            delay = min(delay, 60)  # Cap at 60 seconds
-                        except ValueError:
+                        self.logger.info(
+                            "Sent comment to %s (commentid=%s)", username, commentid
+                        )
+
+                        # Random delay to avoid rate limiting
+                        time.sleep(random.uniform(3, 8))
+
+                    elif response.status_code == 429:
+                        # Rate limited - check Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = int(retry_after)
+                                delay = min(delay, 60)  # Cap at 60 seconds
+                            except ValueError:
+                                delay = 10
+                        else:
                             delay = 10
+
+                        # Return watcher to queue
+                        with self._queue_lock:
+                            self._watchers_queue.insert(0, watcher)
+
+                        self.logger.warning(
+                            "Rate limited for %s, backing off for %s seconds",
+                            username,
+                            delay,
+                        )
+                        time.sleep(delay)
+
                     else:
-                        delay = 10
+                        # Other error - log as failed
+                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
 
-                    # Return watcher to queue
-                    with self._queue_lock:
-                        self._watchers_queue.insert(0, watcher)
+                        self.log_repo.add_log(
+                            message_id=message_id,
+                            recipient_username=username,
+                            recipient_userid=userid,
+                            status=MessageLogStatus.FAILED,
+                            error_message=error_msg,
+                        )
 
-                    self.logger.warning(
-                        "Rate limited for %s, backing off for %s seconds", username, delay
-                    )
-                    time.sleep(delay)
+                        with self._stats_lock:
+                            self._worker_stats["errors"] += 1
+                            self._worker_stats["last_error"] = error_msg
 
-                else:
-                    # Other error - log as failed
-                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                        self.logger.error(
+                            "Failed to send to %s: %s", username, error_msg
+                        )
+                        time.sleep(2)
+
+                except requests.RequestException as e:
+                    # Network error - log as failed
+                    error_msg = f"Network error: {str(e)}"
 
                     self.log_repo.add_log(
                         message_id=message_id,
@@ -611,46 +655,27 @@ class ProfileMessageService:
                         self._worker_stats["errors"] += 1
                         self._worker_stats["last_error"] = error_msg
 
-                    self.logger.error("Failed to send to %s: %s", username, error_msg)
+                    self.logger.error("Network error for %s: %s", username, e)
+                    time.sleep(5)
+
+                except Exception as e:
+                    # Unexpected error - log and continue
+                    error_msg = f"Unexpected error: {str(e)}"
+
+                    self.log_repo.add_log(
+                        message_id=message_id,
+                        recipient_username=username,
+                        recipient_userid=userid,
+                        status=MessageLogStatus.FAILED,
+                        error_message=error_msg,
+                    )
+
+                    with self._stats_lock:
+                        self._worker_stats["errors"] += 1
+                        self._worker_stats["last_error"] = error_msg
+
+                    self.logger.exception("Unexpected error for %s", username)
                     time.sleep(2)
-
-            except requests.RequestException as e:
-                # Network error - log as failed
-                error_msg = f"Network error: {str(e)}"
-
-                self.log_repo.add_log(
-                    message_id=message_id,
-                    recipient_username=username,
-                    recipient_userid=userid,
-                    status=MessageLogStatus.FAILED,
-                    error_message=error_msg,
-                )
-
-                with self._stats_lock:
-                    self._worker_stats["errors"] += 1
-                    self._worker_stats["last_error"] = error_msg
-
-                self.logger.error("Network error for %s: %s", username, e)
-                time.sleep(5)
-
-            except Exception as e:
-                # Unexpected error - log and continue
-                error_msg = f"Unexpected error: {str(e)}"
-
-                self.log_repo.add_log(
-                    message_id=message_id,
-                    recipient_username=username,
-                    recipient_userid=userid,
-                    status=MessageLogStatus.FAILED,
-                    error_message=error_msg,
-                )
-
-                with self._stats_lock:
-                    self._worker_stats["errors"] += 1
-                    self._worker_stats["last_error"] = error_msg
-
-                self.logger.exception("Unexpected error for %s", username)
-                time.sleep(2)
-
-        self._worker_running = False
-        self.logger.info("Worker loop stopped")
+        finally:
+            self._worker_running = False
+            self.logger.info("Worker loop stopped")
