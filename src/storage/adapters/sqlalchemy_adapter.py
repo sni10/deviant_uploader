@@ -8,6 +8,7 @@ from sqlalchemy.pool import NullPool
 from ..base_repository import DBConnection
 from ..models import Base
 from ..feed_tables import metadata as feed_metadata
+from ..profile_message_tables import metadata as profile_message_metadata
 
 
 class SQLAlchemyConnection:
@@ -97,6 +98,9 @@ class SQLAlchemyAdapter:
 
         # Create all tables defined in Core metadata (feed tables)
         feed_metadata.create_all(self.engine)
+
+        # Create all tables defined in Core metadata (profile message tables)
+        profile_message_metadata.create_all(self.engine)
     
     def get_connection(self) -> DBConnection:
         """Create and return a new SQLAlchemy session wrapped as DBConnection.

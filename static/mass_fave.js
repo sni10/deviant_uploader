@@ -150,6 +150,32 @@
     }
   }
 
+  async function resetFailedDeviations() {
+    setStatus("Resetting failed deviations...");
+    addLog("Resetting failed deviations to pending");
+
+    try {
+      const resp = await fetch("/api/mass-fave/reset-failed", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (!json.success) {
+        throw new Error(json.error || "Unknown error");
+      }
+
+      const resetCount = json.reset_count || 0;
+      const msg = `Reset ${resetCount} failed deviation(s) to pending`;
+      setStatus(msg, "success");
+      addLog(msg);
+      await fetchStatus();
+    } catch (e) {
+      const msg = "Failed to reset deviations: " + e.message;
+      setStatus(msg, "error");
+      addLog(msg);
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
     await fetchStatus();
     addLog("Page loaded");
@@ -165,4 +191,5 @@
   window.collectFeed = collectFeed;
   window.startWorker = startWorker;
   window.stopWorker = stopWorker;
+  window.resetFailedDeviations = resetFailedDeviations;
 })();
