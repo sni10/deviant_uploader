@@ -39,6 +39,14 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 - Batch favorite operations
 - Web UI integration
 
+### 💬 Profile Broadcasting
+- Send profile comments to your watchers
+- Message template system with reusable templates
+- Selective recipient management (choose specific watchers)
+- Background worker with rate limiting
+- Full send log with profile links and comment IDs
+- Retry-After header compliance
+
 ### Technical Features
 - OAuth2 authentication with auto-refresh
 - SQLite and PostgreSQL support (SQLite default)
@@ -57,12 +65,14 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 ---------
 
 <details>
-  <summary> --== Open views image ==-- </summary>
+  <summary> OPEN SCREENSHOTS </summary>
 
 ![DeviantArt-Stats-Dashboard-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Stats-Dashboard-12-09-2025_09_54_AM.png)
 ![Statistics-Charts-DeviantArt-Dashboard-12-09-2025_09_54_AM.png](doc/img/Statistics-Charts-DeviantArt-Dashboard-12-09-2025_09_54_AM.png)
 ![DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png)
 ![Screenshot 2025-12-17 060642.png](doc/img/Screenshot%202025-12-17%20060642.png)
+![Profile-Broadcasting-DeviantArt-Dashboard-12-17-2025_07_19_AM.png](doc/img/Profile-Broadcasting-DeviantArt-Dashboard-12-17-2025_07_19_AM.png)
+
 </details>
 
 ---------
