@@ -258,3 +258,30 @@ class UploadPreset(Base):
     is_default = Column(Integer, default=0, index=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class FeedState(Base):
+    """Key-value store for feed cursor and other state."""
+
+    __tablename__ = 'feed_state'
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class FeedDeviation(Base):
+    """Queue of deviations from feed for auto-faving."""
+
+    __tablename__ = 'feed_deviations'
+
+    deviationid = Column(String, primary_key=True)
+    ts = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default='pending', index=True)
+    attempts = Column(Integer, default=0)
+    last_error = Column(Text)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_feed_deviations_status_ts', 'status', 'ts'),
+    )
