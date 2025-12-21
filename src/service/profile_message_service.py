@@ -134,7 +134,11 @@ class ProfileMessageService:
                 break
 
             # Delay between pages
-            time.sleep(2)
+            delay = self.http_client.get_recommended_delay()
+            self.logger.debug(
+                "Waiting %s seconds before next watchers page request", delay
+            )
+            time.sleep(delay)
 
         self.logger.info("Fetched %s watchers for %s", watchers_fetched, username)
 
@@ -643,8 +647,13 @@ class ProfileMessageService:
                         "Sent comment to %s (commentid=%s)", username, commentid
                     )
 
-                    # Random delay to avoid rate limiting
-                    time.sleep(random.uniform(3, 8))
+                    # Rate limiting: use recommended delay from HTTP client
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before next profile comment request",
+                        delay,
+                    )
+                    time.sleep(delay)
 
                 except requests.RequestException as e:
                     # HTTP client already retried - this is final failure
@@ -681,7 +690,12 @@ class ProfileMessageService:
                         )
                         break
 
-                    time.sleep(2)
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before retry after failure",
+                        delay,
+                    )
+                    time.sleep(delay)
 
                 except Exception as e:
                     # Unexpected error - log and continue
@@ -700,7 +714,12 @@ class ProfileMessageService:
                         self._worker_stats["last_error"] = error_msg
 
                     self.logger.exception("Unexpected error for %s", username)
-                    time.sleep(2)
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before continuing after unexpected error",
+                        delay,
+                    )
+                    time.sleep(delay)
         finally:
             self._worker_running = False
             self.logger.info("Worker loop stopped")

@@ -119,7 +119,12 @@ class MassFaveService:
 
             # Delay between pages to avoid rate limiting
             if pages < max_pages:
-                time.sleep(2)
+                delay = self.http_client.get_recommended_delay()
+                self.logger.debug(
+                    "Waiting %s seconds before next feed page request",
+                    delay,
+                )
+                time.sleep(delay)
 
         self.logger.info(
             "Feed collection completed: pages=%s, deviations=%s, offset=%s",

@@ -103,8 +103,13 @@ class GalleryService:
                 
                 if has_more and next_offset is not None:
                     offset = next_offset
-                    # Rate limiting: wait 3 seconds before next pagination request
-                    time.sleep(3)
+                    # Rate limiting: use recommended delay from HTTP client
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before next galleries page request",
+                        delay,
+                    )
+                    time.sleep(delay)
                 else:
                     has_more = False
                     

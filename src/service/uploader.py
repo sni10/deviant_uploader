@@ -2,6 +2,7 @@
 import json
 import logging
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -816,8 +817,12 @@ class UploaderService:
                 
                 # Rate limiting: 2 second delay between uploads
                 if idx < len(deviation_ids):
-                    import time
-                    time.sleep(2)
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before next stash upload",
+                        delay,
+                    )
+                    time.sleep(delay)
                     
             except Exception as e:
                 self.logger.error(f"Exception during stash of deviation {dev_id}: {e}", exc_info=True)
@@ -904,8 +909,12 @@ class UploaderService:
                 
                 # Rate limiting: 2 second delay between publishes
                 if idx < len(deviation_ids):
-                    import time
-                    time.sleep(2)
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before next publish",
+                        delay,
+                    )
+                    time.sleep(delay)
                     
             except Exception as e:
                 self.logger.error(f"Exception during publish of deviation {dev_id}: {e}", exc_info=True)
@@ -1022,8 +1031,12 @@ class UploaderService:
 
                 # Rate limiting: 2 second delay between uploads
                 if idx < len(deviation_ids):
-                    import time
-                    time.sleep(2)
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before next upload",
+                        delay,
+                    )
+                    time.sleep(delay)
                     
             except Exception as e:
                 self.logger.error(f"Exception during upload of deviation {dev_id}: {e}", exc_info=True)

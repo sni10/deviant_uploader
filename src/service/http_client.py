@@ -57,6 +57,16 @@ class DeviantArtHttpClient:
         """Reset the last retry delay after successful requests without rate limiting."""
         self._last_retry_delay = 0
 
+    def _sleep(self, delay: int, *, reason: str) -> None:
+        """Sleep for a given delay.
+
+        Args:
+            delay: Delay in seconds.
+            reason: Short reason for sleeping (used for debug logging).
+        """
+        self.logger.debug("Sleeping %s seconds (%s)", delay, reason)
+        time.sleep(delay)
+
     @staticmethod
     def _is_rate_limited_response(response: requests.Response) -> bool:
         """Check if response indicates rate limiting.
@@ -234,7 +244,7 @@ class DeviantArtHttpClient:
                         delay,
                     )
 
-                    time.sleep(delay)
+                    self._sleep(delay, reason=f"retry after {error_type}")
                     continue
 
                 # Success or non-retryable error
@@ -276,7 +286,7 @@ class DeviantArtHttpClient:
                     delay,
                 )
 
-                time.sleep(delay)
+                self._sleep(delay, reason="retry after network error")
                 continue
 
         # Should not reach here, but just in case
