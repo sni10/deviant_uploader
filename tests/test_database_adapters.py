@@ -1,221 +1,69 @@
-"""Tests for database adapters and abstraction layer."""
+"""Tests for PostgreSQL adapter and connection abstraction."""
 
-import pytest
-import tempfile
-import os
-from pathlib import Path
+from __future__ import annotations
 
-from src.storage.adapters import SQLiteAdapter, SQLiteConnection
+from sqlalchemy import insert, select, text
+
+from src.storage.adapters import SQLAlchemyAdapter
 from src.storage.adapters.base import DatabaseAdapter
 from src.storage.base_repository import DBConnection
-from src.storage.database import get_database_adapter, get_connection
+from src.storage.database import get_database_adapter
+from src.storage.models import User as UserModel
 
 
-class TestSQLiteConnection:
-    """Test SQLiteConnection wrapper implements DBConnection protocol."""
-    
-    def test_sqlite_connection_implements_protocol(self):
-        """Test that SQLiteConnection implements DBConnection protocol."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            adapter = SQLiteAdapter(db_path)
-            adapter.initialize()
-            conn = adapter.get_connection()
-            
-            # Verify it's recognized as DBConnection
-            assert isinstance(conn, DBConnection)
-            
-            conn.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-    
-    def test_sqlite_connection_execute(self):
-        """Test SQLiteConnection execute method."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            adapter = SQLiteAdapter(db_path)
-            adapter.initialize()
-            conn = adapter.get_connection()
-            
-            # Test execute without parameters
-            cursor = conn.execute("SELECT 1")
-            result = cursor.fetchone()
-            assert result[0] == 1
-            
-            # Test execute with parameters
-            cursor = conn.execute("SELECT ? + ?", (2, 3))
-            result = cursor.fetchone()
-            assert result[0] == 5
-            
-            conn.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-    
-    def test_sqlite_connection_commit(self):
-        """Test SQLiteConnection commit method."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            adapter = SQLiteAdapter(db_path)
-            adapter.initialize()
-            conn = adapter.get_connection()
-            
-            # Insert data
-            conn.execute("INSERT INTO users (userid, username, type) VALUES (?, ?, ?)",
-                        ('test123', 'testuser', 'regular'))
-            conn.commit()
-            
-            # Verify data was committed
-            cursor = conn.execute("SELECT username FROM users WHERE userid = ?", ('test123',))
-            result = cursor.fetchone()
-            assert result[0] == 'testuser'
-            
-            conn.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
+class TestSQLAlchemyConnection:
+    """Test SQLAlchemyConnection wrapper implements DBConnection protocol."""
+
+    def test_connection_implements_protocol(self, db_conn):
+        """Return object should satisfy DBConnection protocol."""
+
+        assert isinstance(db_conn, DBConnection)
+
+    def test_connection_execute_text(self, db_conn):
+        """Execute raw SQL via SQLAlchemy text()."""
+
+        result = db_conn.execute("SELECT 1")
+        assert result.scalar_one() == 1
+
+        result = db_conn.execute(text("SELECT :a + :b"), {"a": 2, "b": 3})
+        assert result.scalar_one() == 5
+
+    def test_connection_commit(self, db_conn):
+        """Commit should persist changes inside the test schema."""
+
+        users = UserModel.__table__
+        db_conn.execute(
+            insert(users).values(userid="u-1", username="name", type="regular")
+        )
+        db_conn.commit()
+
+        result = db_conn.execute(select(users.c.username).where(users.c.userid == "u-1"))
+        assert result.scalar_one() == "name"
 
 
-class TestSQLiteAdapter:
-    """Test SQLiteAdapter implementation."""
-    
-    def test_sqlite_adapter_implements_protocol(self):
-        """Test that SQLiteAdapter implements DatabaseAdapter protocol."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            adapter = SQLiteAdapter(db_path)
-            # Verify it's recognized as DatabaseAdapter
-            assert isinstance(adapter, DatabaseAdapter)
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-    
-    def test_sqlite_adapter_initialize(self):
-        """Test SQLiteAdapter initialization creates schema."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            adapter = SQLiteAdapter(db_path)
-            adapter.initialize()
-            
-            # Verify database file exists
-            assert os.path.exists(db_path)
-            
-            # Verify tables were created
-            conn = adapter.get_connection()
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-            )
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            # Check for key tables
-            assert 'users' in tables
-            assert 'oauth_tokens' in tables
-            assert 'galleries' in tables
-            assert 'deviations' in tables
-            assert 'deviation_stats' in tables
-            
-            conn.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-    
-    def test_sqlite_adapter_get_connection(self):
-        """Test SQLiteAdapter get_connection returns valid connection."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            adapter = SQLiteAdapter(db_path)
-            adapter.initialize()
-            
-            conn = adapter.get_connection()
-            assert conn is not None
-            assert isinstance(conn, DBConnection)
-            
-            # Test connection works
-            cursor = conn.execute("SELECT 1")
-            assert cursor.fetchone()[0] == 1
-            
-            conn.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
+class TestSQLAlchemyAdapter:
+    """Test SQLAlchemyAdapter implementation."""
+
+    def test_adapter_implements_protocol(self, database_url):
+        """Adapter should satisfy DatabaseAdapter protocol."""
+
+        adapter = SQLAlchemyAdapter(database_url)
+        assert isinstance(adapter, DatabaseAdapter)
 
 
 class TestDatabaseFactory:
-    """Test database factory functions."""
-    
-    def test_get_database_adapter_sqlite(self, monkeypatch):
-        """Test get_database_adapter returns SQLiteAdapter for sqlite type."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            # Create a mock config object without triggering validation
-            class MockConfig:
-                database_type = 'sqlite'
-                database_path = Path(db_path)
-            
-            def mock_get_config():
-                return MockConfig()
-            
-            monkeypatch.setattr('src.config.get_config', mock_get_config)
-            
-            adapter = get_database_adapter()
-            assert isinstance(adapter, SQLiteAdapter)
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-    
-    def test_get_database_adapter_unsupported_type(self, monkeypatch):
-        """Test get_database_adapter raises error for unsupported type."""
-        # Create a mock config object without triggering validation
+    """Test database factory function returns Postgres adapter."""
+
+    def test_get_database_adapter_returns_sqlalchemy_adapter(self, monkeypatch, database_url):
+        """Factory should return SQLAlchemyAdapter in Postgres-only mode."""
+
         class MockConfig:
-            database_type = 'mongodb'  # Unsupported
-        
-        def mock_get_config():
-            return MockConfig()
-        
-        monkeypatch.setattr('src.config.get_config', mock_get_config)
-        
-        with pytest.raises(ValueError, match="Unsupported DATABASE_TYPE"):
-            get_database_adapter()
-    
-    def test_get_connection_function(self, monkeypatch):
-        """Test get_connection convenience function."""
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            db_path = tmp.name
-        
-        try:
-            # Create a mock config object without triggering validation
-            class MockConfig:
-                database_type = 'sqlite'
-                database_path = Path(db_path)
-            
-            def mock_get_config():
-                return MockConfig()
-            
-            monkeypatch.setattr('src.config.get_config', mock_get_config)
-            
-            conn = get_connection()
-            assert isinstance(conn, DBConnection)
-            
-            # Verify connection works
-            cursor = conn.execute("SELECT 1")
-            assert cursor.fetchone()[0] == 1
-            
-            conn.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
+            def __init__(self, url: str):
+                self.database_url = url
+
+        monkeypatch.setattr(
+            "src.config.get_config", lambda: MockConfig(database_url)
+        )
+
+        adapter = get_database_adapter()
+        assert isinstance(adapter, SQLAlchemyAdapter)

@@ -7,6 +7,8 @@ from logging import Logger
 from typing import Optional
 import requests
 
+from sqlalchemy import text
+
 from ..storage.deviation_repository import DeviationRepository
 from ..storage.deviation_stats_repository import DeviationStatsRepository
 from ..storage.gallery_repository import GalleryRepository
@@ -635,29 +637,30 @@ class StatsService:
         Returns:
             Dictionary with labels (dates) and datasets (views, favourites)
         """
-        # Build SQL query with optional filtering by deviation IDs
-        if deviation_ids and len(deviation_ids) > 0:
-            placeholders = ",".join("?" * len(deviation_ids))
-            where_clause = f"WHERE deviationid IN ({placeholders}) AND"
-            params = list(deviation_ids) + [period_days]
-        else:
-            where_clause = "WHERE"
-            params = [period_days]
-
-        query = f"""
+        # PostgreSQL-compatible query (no SQLite-specific `?` placeholders / `date('now', ...)`).
+        # `deviation_ids` is optional; when provided we filter using `= ANY(:deviation_ids)`.
+        query = text(
+            """
             SELECT
                 snapshot_date,
                 SUM(views) as total_views,
                 SUM(favourites) as total_favourites,
                 SUM(comments) as total_comments
             FROM stats_snapshots
-            {where_clause} snapshot_date >= date('now', '-' || ? || ' days')
+            WHERE (:deviation_ids IS NULL OR deviationid = ANY(:deviation_ids))
+              AND snapshot_date::date >= CURRENT_DATE - (:period_days * INTERVAL '1 day')
             GROUP BY snapshot_date
             ORDER BY snapshot_date ASC
-        """
+            """
+        )
 
-        cursor = self.stats_snapshot_repo.conn.execute(query, params)
-        rows = cursor.fetchall()
+        params = {
+            "deviation_ids": deviation_ids if deviation_ids else None,
+            "period_days": period_days,
+        }
+
+        result = self.stats_snapshot_repo.conn.execute(query, params)
+        rows = result.fetchall()
 
         labels = []
         views_data = []
@@ -691,20 +694,24 @@ class StatsService:
         Returns:
             Dictionary with labels (dates) and datasets (watchers, friends)
         """
-        cursor = self.user_stats_snapshot_repo.conn.execute(
+        query = text(
             """
             SELECT
                 snapshot_date,
                 watchers,
                 friends
             FROM user_stats_snapshots
-            WHERE username = ?
-                AND snapshot_date >= date('now', '-' || ? || ' days')
+            WHERE username = :username
+              AND snapshot_date::date >= CURRENT_DATE - (:period_days * INTERVAL '1 day')
             ORDER BY snapshot_date ASC
-            """,
-            (username, period_days),
+            """
         )
-        rows = cursor.fetchall()
+
+        result = self.user_stats_snapshot_repo.conn.execute(
+            query,
+            {"username": username, "period_days": period_days},
+        )
+        rows = result.fetchall()
 
         labels = []
         watchers_data = []

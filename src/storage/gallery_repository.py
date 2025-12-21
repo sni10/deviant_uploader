@@ -2,8 +2,12 @@
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from ..domain.models import Gallery
 from .base_repository import BaseRepository
+from .models import Gallery as GalleryModel
 
 
 class GalleryRepository(BaseRepository):
@@ -24,53 +28,27 @@ class GalleryRepository(BaseRepository):
         Returns:
             Gallery ID
         """
-        # Check if gallery with this folderid already exists
-        existing = self.get_gallery_by_folderid(gallery.folderid)
-        
-        if existing:
-            # Update existing gallery
-            self.conn.execute(
-                """
-                UPDATE galleries SET
-                    name = ?,
-                    parent = ?,
-                    size = ?,
-                    sync_enabled = ?,
-                    updated_at = ?
-                WHERE folderid = ?
-                """,
-                (
-                    gallery.name,
-                    gallery.parent,
-                    gallery.size,
-                    1 if gallery.sync_enabled else 0,
-                    datetime.now().isoformat(),
-                    gallery.folderid
-                )
-            )
-            self.conn.commit()
-            return existing.gallery_db_id
-        else:
-            # Insert new gallery
-            cursor = self.conn.execute(
-                """
-                INSERT INTO galleries (
-                    folderid, name, parent, size, sync_enabled, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    gallery.folderid,
-                    gallery.name,
-                    gallery.parent,
-                    gallery.size,
-                    1 if gallery.sync_enabled else 0,
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                )
-            )
-            self.conn.commit()
-            gallery.gallery_db_id = cursor.lastrowid
-            return cursor.lastrowid
+        table = GalleryModel.__table__
+
+        values = {
+            "folderid": gallery.folderid,
+            "name": gallery.name,
+            "parent": gallery.parent,
+            "size": gallery.size,
+            "sync_enabled": 1 if gallery.sync_enabled else 0,
+        }
+
+        stmt = (
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(index_elements=[table.c.folderid], set_=values)
+            .returning(table.c.id)
+        )
+
+        gallery_id = int(self._execute(stmt).scalar_one())
+        self.conn.commit()
+        gallery.gallery_db_id = gallery_id
+        return gallery_id
     
     def get_gallery_by_id(self, gallery_id: int) -> Optional[Gallery]:
         """
@@ -82,20 +60,10 @@ class GalleryRepository(BaseRepository):
         Returns:
             Gallery object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, folderid, name, parent, size, sync_enabled, created_at, updated_at
-            FROM galleries
-            WHERE id = ?
-            """,
-            (gallery_id,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_gallery(row)
+        table = GalleryModel.__table__
+        stmt = select(table).where(table.c.id == gallery_id)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_gallery(dict(row))
     
     def get_gallery_by_folderid(self, folderid: str) -> Optional[Gallery]:
         """
@@ -107,20 +75,10 @@ class GalleryRepository(BaseRepository):
         Returns:
             Gallery object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, folderid, name, parent, size, sync_enabled, created_at, updated_at
-            FROM galleries
-            WHERE folderid = ?
-            """,
-            (folderid,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_gallery(row)
+        table = GalleryModel.__table__
+        stmt = select(table).where(table.c.folderid == folderid)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_gallery(dict(row))
     
     def get_all_galleries(self) -> list[Gallery]:
         """
@@ -129,15 +87,9 @@ class GalleryRepository(BaseRepository):
         Returns:
             List of all Gallery objects
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, folderid, name, parent, size, sync_enabled, created_at, updated_at
-            FROM galleries
-            ORDER BY name
-            """
-        )
-        
-        return [self._row_to_gallery(row) for row in cursor.fetchall()]
+        table = GalleryModel.__table__
+        stmt = select(table).order_by(table.c.name)
+        return [self._row_to_gallery(dict(r)) for r in self._execute(stmt).mappings().all()]
 
     def get_sync_enabled_galleries(self) -> list[Gallery]:
         """
@@ -146,16 +98,9 @@ class GalleryRepository(BaseRepository):
         Returns:
             List of Gallery objects with sync enabled
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, folderid, name, parent, size, sync_enabled, created_at, updated_at
-            FROM galleries
-            WHERE sync_enabled = 1
-            ORDER BY name
-            """
-        )
-        
-        return [self._row_to_gallery(row) for row in cursor.fetchall()]
+        table = GalleryModel.__table__
+        stmt = select(table).where(table.c.sync_enabled == 1).order_by(table.c.name)
+        return [self._row_to_gallery(dict(r)) for r in self._execute(stmt).mappings().all()]
     
     def update_sync_enabled(self, folderid: str, sync_enabled: bool) -> bool:
         """
@@ -168,34 +113,40 @@ class GalleryRepository(BaseRepository):
         Returns:
             True if updated successfully, False if gallery not found
         """
-        cursor = self.conn.execute(
-            """
-            UPDATE galleries
-            SET sync_enabled = ?, updated_at = ?
-            WHERE folderid = ?
-            """,
-            (1 if sync_enabled else 0, datetime.now().isoformat(), folderid)
+        table = GalleryModel.__table__
+        stmt = (
+            update(table)
+            .where(table.c.folderid == folderid)
+            .values(sync_enabled=1 if sync_enabled else 0, updated_at=datetime.now())
         )
+        result = self._execute(stmt)
         self.conn.commit()
-        return cursor.rowcount > 0
+        return (result.rowcount or 0) > 0
 
-    def _row_to_gallery(self, row: tuple) -> Gallery:
+    def _row_to_gallery(self, row: dict) -> Gallery:
         """
         Convert database row to Gallery object.
 
         Args:
-            row: Database row tuple
+            row: Database row mapping
 
         Returns:
             Gallery object
         """
+        def _dt(value: object) -> datetime | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value))
+
         return Gallery(
-            folderid=row[1],
-            name=row[2],
-            parent=row[3],
-            size=row[4],
-            sync_enabled=bool(row[5]),
-            gallery_db_id=row[0],
-            created_at=datetime.fromisoformat(row[6]),
-            updated_at=datetime.fromisoformat(row[7])
+            folderid=row.get("folderid"),
+            name=row.get("name"),
+            parent=row.get("parent"),
+            size=row.get("size"),
+            sync_enabled=bool(row.get("sync_enabled")),
+            gallery_db_id=row.get("id"),
+            created_at=_dt(row.get("created_at")) or datetime.now(),
+            updated_at=_dt(row.get("updated_at")) or datetime.now(),
         )

@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(sqlite3:*)",
+      "Bash(docker exec:*)"
     ],
     "ask": []
   },

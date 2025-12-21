@@ -2,8 +2,12 @@
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from ..domain.models import User
 from .base_repository import BaseRepository
+from .models import User as UserModel
 
 
 class UserRepository(BaseRepository):
@@ -24,104 +28,51 @@ class UserRepository(BaseRepository):
         Returns:
             User ID
         """
-        # Check if user with this userid already exists
-        existing = self.get_user_by_userid(user.userid)
-        
-        if existing:
-            # Update existing user
-            self.conn.execute(
-                """
-                UPDATE users SET
-                    username = ?,
-                    usericon = ?,
-                    type = ?,
-                    is_watching = ?,
-                    profile_url = ?,
-                    user_is_artist = ?,
-                    artist_level = ?,
-                    artist_specialty = ?,
-                    real_name = ?,
-                    tagline = ?,
-                    country_id = ?,
-                    country = ?,
-                    website = ?,
-                    bio = ?,
-                    user_deviations = ?,
-                    user_favourites = ?,
-                    user_comments = ?,
-                    profile_pageviews = ?,
-                    profile_comments = ?,
-                    updated_at = ?
-                WHERE userid = ?
-                """,
-                (
-                    user.username,
-                    user.usericon,
-                    user.type,
-                    1 if user.is_watching else 0 if user.is_watching is not None else None,
-                    user.profile_url,
-                    1 if user.user_is_artist else 0 if user.user_is_artist is not None else None,
-                    user.artist_level,
-                    user.artist_specialty,
-                    user.real_name,
-                    user.tagline,
-                    user.country_id,
-                    user.country,
-                    user.website,
-                    user.bio,
-                    user.user_deviations,
-                    user.user_favourites,
-                    user.user_comments,
-                    user.profile_pageviews,
-                    user.profile_comments,
-                    datetime.now().isoformat(),
-                    user.userid
-                )
-            )
-            self.conn.commit()
-            return existing.user_db_id
-        else:
-            # Insert new user
-            cursor = self.conn.execute(
-                """
-                INSERT INTO users (
-                    userid, username, usericon, type,
-                    is_watching, profile_url, user_is_artist,
-                    artist_level, artist_specialty, real_name,
-                    tagline, country_id, country, website, bio,
-                    user_deviations, user_favourites, user_comments,
-                    profile_pageviews, profile_comments,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user.userid,
-                    user.username,
-                    user.usericon,
-                    user.type,
-                    1 if user.is_watching else 0 if user.is_watching is not None else None,
-                    user.profile_url,
-                    1 if user.user_is_artist else 0 if user.user_is_artist is not None else None,
-                    user.artist_level,
-                    user.artist_specialty,
-                    user.real_name,
-                    user.tagline,
-                    user.country_id,
-                    user.country,
-                    user.website,
-                    user.bio,
-                    user.user_deviations,
-                    user.user_favourites,
-                    user.user_comments,
-                    user.profile_pageviews,
-                    user.profile_comments,
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                )
-            )
-            self.conn.commit()
-            user.user_db_id = cursor.lastrowid
-            return cursor.lastrowid
+        table = UserModel.__table__
+
+        values = {
+            "userid": user.userid,
+            "username": user.username,
+            "usericon": user.usericon,
+            "type": user.type,
+            "is_watching": (
+                1 if user.is_watching else 0 if user.is_watching is not None else None
+            ),
+            "profile_url": user.profile_url,
+            "user_is_artist": (
+                1
+                if user.user_is_artist
+                else 0
+                if user.user_is_artist is not None
+                else None
+            ),
+            "artist_level": user.artist_level,
+            "artist_specialty": user.artist_specialty,
+            "real_name": user.real_name,
+            "tagline": user.tagline,
+            "country_id": user.country_id,
+            "country": user.country,
+            "website": user.website,
+            "bio": user.bio,
+            "user_deviations": user.user_deviations,
+            "user_favourites": user.user_favourites,
+            "user_comments": user.user_comments,
+            "profile_pageviews": user.profile_pageviews,
+            "profile_comments": user.profile_comments,
+        }
+
+        stmt = (
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(index_elements=[table.c.userid], set_=values)
+            .returning(table.c.id)
+        )
+
+        user_db_id = int(self._execute(stmt).scalar_one())
+        self.conn.commit()
+
+        user.user_db_id = user_db_id
+        return user_db_id
     
     def get_user_by_id(self, user_id: int) -> Optional[User]:
         """
@@ -133,26 +84,10 @@ class UserRepository(BaseRepository):
         Returns:
             User object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, userid, username, usericon, type,
-                   is_watching, profile_url, user_is_artist,
-                   artist_level, artist_specialty, real_name,
-                   tagline, country_id, country, website, bio,
-                   user_deviations, user_favourites, user_comments,
-                   profile_pageviews, profile_comments,
-                   created_at, updated_at
-            FROM users
-            WHERE id = ?
-            """,
-            (user_id,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_user(row)
+        table = UserModel.__table__
+        stmt = select(table).where(table.c.id == user_id)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_user(dict(row))
     
     def get_user_by_userid(self, userid: str) -> Optional[User]:
         """
@@ -164,26 +99,10 @@ class UserRepository(BaseRepository):
         Returns:
             User object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, userid, username, usericon, type,
-                   is_watching, profile_url, user_is_artist,
-                   artist_level, artist_specialty, real_name,
-                   tagline, country_id, country, website, bio,
-                   user_deviations, user_favourites, user_comments,
-                   profile_pageviews, profile_comments,
-                   created_at, updated_at
-            FROM users
-            WHERE userid = ?
-            """,
-            (userid,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_user(row)
+        table = UserModel.__table__
+        stmt = select(table).where(table.c.userid == userid)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_user(dict(row))
     
     def get_user_by_username(self, username: str) -> Optional[User]:
         """
@@ -195,26 +114,10 @@ class UserRepository(BaseRepository):
         Returns:
             User object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, userid, username, usericon, type,
-                   is_watching, profile_url, user_is_artist,
-                   artist_level, artist_specialty, real_name,
-                   tagline, country_id, country, website, bio,
-                   user_deviations, user_favourites, user_comments,
-                   profile_pageviews, profile_comments,
-                   created_at, updated_at
-            FROM users
-            WHERE username = ?
-            """,
-            (username,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_user(row)
+        table = UserModel.__table__
+        stmt = select(table).where(table.c.username == username)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_user(dict(row))
     
     def get_all_users(self) -> list[User]:
         """
@@ -223,54 +126,53 @@ class UserRepository(BaseRepository):
         Returns:
             List of all User objects
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, userid, username, usericon, type,
-                   is_watching, profile_url, user_is_artist,
-                   artist_level, artist_specialty, real_name,
-                   tagline, country_id, country, website, bio,
-                   user_deviations, user_favourites, user_comments,
-                   profile_pageviews, profile_comments,
-                   created_at, updated_at
-            FROM users
-            ORDER BY username
-            """
-        )
-        
-        return [self._row_to_user(row) for row in cursor.fetchall()]
+        table = UserModel.__table__
+        stmt = select(table).order_by(table.c.username)
+        return [self._row_to_user(dict(row)) for row in self._execute(stmt).mappings().all()]
     
-    def _row_to_user(self, row: tuple) -> User:
+    def _row_to_user(self, row: dict) -> User:
         """
         Convert database row to User object.
         
         Args:
-            row: Database row tuple
+            row: Database row mapping
             
         Returns:
             User object
         """
+        def _dt(value: object) -> datetime | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value))
+
         return User(
-            userid=row[1],
-            username=row[2],
-            usericon=row[3],
-            type=row[4],
-            is_watching=bool(row[5]) if row[5] is not None else None,
-            profile_url=row[6],
-            user_is_artist=bool(row[7]) if row[7] is not None else None,
-            artist_level=row[8],
-            artist_specialty=row[9],
-            real_name=row[10],
-            tagline=row[11],
-            country_id=row[12],
-            country=row[13],
-            website=row[14],
-            bio=row[15],
-            user_deviations=row[16],
-            user_favourites=row[17],
-            user_comments=row[18],
-            profile_pageviews=row[19],
-            profile_comments=row[20],
-            created_at=datetime.fromisoformat(row[21]),
-            updated_at=datetime.fromisoformat(row[22]),
-            user_db_id=row[0]
+            userid=row.get("userid"),
+            username=row.get("username"),
+            usericon=row.get("usericon"),
+            type=row.get("type"),
+            is_watching=bool(row.get("is_watching"))
+            if row.get("is_watching") is not None
+            else None,
+            profile_url=row.get("profile_url"),
+            user_is_artist=bool(row.get("user_is_artist"))
+            if row.get("user_is_artist") is not None
+            else None,
+            artist_level=row.get("artist_level"),
+            artist_specialty=row.get("artist_specialty"),
+            real_name=row.get("real_name"),
+            tagline=row.get("tagline"),
+            country_id=row.get("country_id"),
+            country=row.get("country"),
+            website=row.get("website"),
+            bio=row.get("bio"),
+            user_deviations=row.get("user_deviations"),
+            user_favourites=row.get("user_favourites"),
+            user_comments=row.get("user_comments"),
+            profile_pageviews=row.get("profile_pageviews"),
+            profile_comments=row.get("profile_comments"),
+            created_at=_dt(row.get("created_at")) or datetime.now(),
+            updated_at=_dt(row.get("updated_at")) or datetime.now(),
+            user_db_id=row.get("id"),
         )

@@ -3,27 +3,15 @@
 Following TDD approach: these tests are written before implementation
 to drive the design of the new repository.
 """
-import sqlite3
 import pytest
 from src.storage.deviation_stats_repository import DeviationStatsRepository
-from src.storage.database import DATABASE_SCHEMA
 
 
 @pytest.fixture
-def connection():
-    """Create an isolated in-memory SQLite connection for testing."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(DATABASE_SCHEMA)
-    conn.commit()
-    yield conn
-    conn.close()
-
-
-@pytest.fixture
-def repo(connection):
+def repo(db_conn):
     """Create a DeviationStatsRepository instance for testing."""
-    return DeviationStatsRepository(connection)
+
+    return DeviationStatsRepository(db_conn)
 
 
 class TestDeviationStatsRepository:

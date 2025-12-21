@@ -4,7 +4,7 @@ Storage layer with database abstraction supporting SQLite and PostgreSQL.
 Follows DDD and SOLID principles with separate repositories for each domain entity.
 Database backend is selected via DATABASE_TYPE configuration.
 """
-from .database import init_database, get_connection, get_database_adapter
+from .database import get_connection, get_database_adapter
 from .base_repository import BaseRepository, DBConnection
 from .user_repository import UserRepository
 from .oauth_token_repository import OAuthTokenRepository
@@ -29,7 +29,6 @@ __all__ = [
     "create_repositories",
     "get_connection",
     "get_database_adapter",
-    "init_database",
 ]
 
 

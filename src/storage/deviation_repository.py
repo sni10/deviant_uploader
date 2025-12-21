@@ -3,8 +3,11 @@ import json
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import desc, insert, select, update
+
 from ..domain.models import Deviation, UploadStatus
 from .base_repository import BaseRepository
+from .models import Deviation as DeviationModel
 
 
 class DeviationRepository(BaseRepository):
@@ -25,55 +28,51 @@ class DeviationRepository(BaseRepository):
         Returns:
             Deviation ID
         """
-        cursor = self.conn.execute(
-            """
-            INSERT INTO deviations (
-                filename, title, file_path, status,
-                is_mature, mature_level, mature_classification,
-                feature, allow_comments, display_resolution,
-                tags, allow_free_download, add_watermark,
-                is_ai_generated, noai,
-                artist_comments, original_url, is_dirty, stack, stackid,
-                itemid, gallery_id, deviationid, url, error,
-                created_at, uploaded_at, published_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                deviation.filename,
-                deviation.title,
-                deviation.file_path,
-                deviation.status.value,
-                1 if deviation.is_mature else 0,
-                deviation.mature_level,
-                json.dumps(deviation.mature_classification)
-                if deviation.mature_classification
-                else None,
-                1 if deviation.feature else 0,
-                1 if deviation.allow_comments else 0,
-                deviation.display_resolution,
-                json.dumps(deviation.tags) if deviation.tags else None,
-                1 if deviation.allow_free_download else 0,
-                1 if deviation.add_watermark else 0,
-                1 if deviation.is_ai_generated else 0,
-                1 if deviation.noai else 0,
-                deviation.artist_comments,
-                deviation.original_url,
-                1 if deviation.is_dirty else 0,
-                deviation.stack,
-                deviation.stackid,
-                deviation.itemid,
-                deviation.gallery_id,
-                deviation.deviationid,
-                deviation.url,
-                deviation.error,
-                deviation.created_at.isoformat(),
-                deviation.uploaded_at.isoformat() if deviation.uploaded_at else None,
-                deviation.published_time,
-            ),
+        table = DeviationModel.__table__
+
+        stmt = (
+            insert(table)
+            .values(
+                filename=deviation.filename,
+                title=deviation.title,
+                file_path=deviation.file_path,
+                status=deviation.status.value,
+                is_mature=1 if deviation.is_mature else 0,
+                mature_level=deviation.mature_level,
+                mature_classification=(
+                    json.dumps(deviation.mature_classification)
+                    if deviation.mature_classification
+                    else None
+                ),
+                feature=1 if deviation.feature else 0,
+                allow_comments=1 if deviation.allow_comments else 0,
+                display_resolution=deviation.display_resolution,
+                tags=json.dumps(deviation.tags) if deviation.tags else None,
+                allow_free_download=1 if deviation.allow_free_download else 0,
+                add_watermark=1 if deviation.add_watermark else 0,
+                is_ai_generated=1 if deviation.is_ai_generated else 0,
+                noai=1 if deviation.noai else 0,
+                artist_comments=deviation.artist_comments,
+                original_url=deviation.original_url,
+                is_dirty=1 if deviation.is_dirty else 0,
+                stack=deviation.stack,
+                stackid=deviation.stackid,
+                itemid=deviation.itemid,
+                gallery_id=deviation.gallery_id,
+                deviationid=deviation.deviationid,
+                url=deviation.url,
+                error=deviation.error,
+                created_at=deviation.created_at,
+                uploaded_at=deviation.uploaded_at,
+                published_time=deviation.published_time,
+            )
+            .returning(table.c.id)
         )
+
+        deviation_id = int(self._execute(stmt).scalar_one())
         self.conn.commit()
-        deviation.deviation_id = cursor.lastrowid
-        return cursor.lastrowid
+        deviation.deviation_id = deviation_id
+        return deviation_id
     
     def update_deviation(self, deviation: Deviation) -> None:
         """
@@ -85,59 +84,41 @@ class DeviationRepository(BaseRepository):
         if not deviation.deviation_id:
             raise ValueError("Deviation must have deviation_id set for update")
         
-        self.conn.execute(
-            """
-            UPDATE deviations SET
-                title = ?,
-                status = ?,
-                is_mature = ?,
-                mature_level = ?,
-                mature_classification = ?,
-                feature = ?,
-                allow_comments = ?,
-                display_resolution = ?,
-                tags = ?,
-                allow_free_download = ?,
-                add_watermark = ?,
-                is_ai_generated = ?,
-                noai = ?,
-                artist_comments = ?,
-                is_dirty = ?,
-                itemid = ?,
-                gallery_id = ?,
-                deviationid = ?,
-                url = ?,
-                error = ?,
-                uploaded_at = ?
-            WHERE id = ?
-            """,
-            (
-                deviation.title,
-                deviation.status.value,
-                1 if deviation.is_mature else 0,
-                deviation.mature_level,
-                json.dumps(deviation.mature_classification)
-                if deviation.mature_classification
-                else None,
-                1 if deviation.feature else 0,
-                1 if deviation.allow_comments else 0,
-                deviation.display_resolution,
-                json.dumps(deviation.tags) if deviation.tags else None,
-                1 if deviation.allow_free_download else 0,
-                1 if deviation.add_watermark else 0,
-                1 if deviation.is_ai_generated else 0,
-                1 if deviation.noai else 0,
-                deviation.artist_comments,
-                1 if deviation.is_dirty else 0,
-                deviation.itemid,
-                deviation.gallery_id,
-                deviation.deviationid,
-                deviation.url,
-                deviation.error,
-                deviation.uploaded_at.isoformat() if deviation.uploaded_at else None,
-                deviation.deviation_id
+        table = DeviationModel.__table__
+
+        stmt = (
+            update(table)
+            .where(table.c.id == deviation.deviation_id)
+            .values(
+                title=deviation.title,
+                status=deviation.status.value,
+                is_mature=1 if deviation.is_mature else 0,
+                mature_level=deviation.mature_level,
+                mature_classification=(
+                    json.dumps(deviation.mature_classification)
+                    if deviation.mature_classification
+                    else None
+                ),
+                feature=1 if deviation.feature else 0,
+                allow_comments=1 if deviation.allow_comments else 0,
+                display_resolution=deviation.display_resolution,
+                tags=json.dumps(deviation.tags) if deviation.tags else None,
+                allow_free_download=1 if deviation.allow_free_download else 0,
+                add_watermark=1 if deviation.add_watermark else 0,
+                is_ai_generated=1 if deviation.is_ai_generated else 0,
+                noai=1 if deviation.noai else 0,
+                artist_comments=deviation.artist_comments,
+                is_dirty=1 if deviation.is_dirty else 0,
+                itemid=deviation.itemid,
+                gallery_id=deviation.gallery_id,
+                deviationid=deviation.deviationid,
+                url=deviation.url,
+                error=deviation.error,
+                uploaded_at=deviation.uploaded_at,
             )
         )
+
+        self._execute(stmt)
         self.conn.commit()
     
     def get_deviation_by_id(self, deviation_id: int) -> Optional[Deviation]:
@@ -150,27 +131,10 @@ class DeviationRepository(BaseRepository):
         Returns:
             Deviation object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, filename, title, file_path, status,
-                   is_mature, mature_level, mature_classification,
-                   feature, allow_comments, display_resolution,
-                   tags, allow_free_download, add_watermark,
-                   is_ai_generated, noai,
-                   artist_comments, original_url, is_dirty, stack, stackid,
-                   itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at, published_time
-            FROM deviations
-            WHERE id = ?
-            """,
-            (deviation_id,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_deviation(row)
+        table = DeviationModel.__table__
+        stmt = select(table).where(table.c.id == deviation_id)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_deviation(dict(row))
     
     def get_deviation_by_filename(self, filename: str) -> Optional[Deviation]:
         """
@@ -182,27 +146,10 @@ class DeviationRepository(BaseRepository):
         Returns:
             Deviation object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, filename, title, file_path, status,
-                   is_mature, mature_level, mature_classification,
-                   feature, allow_comments, display_resolution,
-                   tags, allow_free_download, add_watermark,
-                   is_ai_generated, noai,
-                   artist_comments, original_url, is_dirty, stack, stackid,
-                   itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at, published_time
-            FROM deviations
-            WHERE filename = ?
-            """,
-            (filename,)
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        return self._row_to_deviation(row)
+        table = DeviationModel.__table__
+        stmt = select(table).where(table.c.filename == filename)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_deviation(dict(row))
     
     def get_deviations_by_status(self, status: UploadStatus) -> list[Deviation]:
         """
@@ -214,24 +161,13 @@ class DeviationRepository(BaseRepository):
         Returns:
             List of Deviation objects
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, filename, title, file_path, status,
-                   is_mature, mature_level, mature_classification,
-                   feature, allow_comments, display_resolution,
-                   tags, allow_free_download, add_watermark,
-                   is_ai_generated, noai,
-                   artist_comments, original_url, is_dirty, stack, stackid,
-                   itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at, published_time
-            FROM deviations
-            WHERE status = ?
-            ORDER BY created_at
-            """,
-            (status.value,)
+        table = DeviationModel.__table__
+        stmt = (
+            select(table)
+            .where(table.c.status == status.value)
+            .order_by(table.c.created_at)
         )
-        
-        return [self._row_to_deviation(row) for row in cursor.fetchall()]
+        return [self._row_to_deviation(dict(r)) for r in self._execute(stmt).mappings().all()]
     
     def get_all_deviations(self) -> list[Deviation]:
         """
@@ -240,22 +176,9 @@ class DeviationRepository(BaseRepository):
         Returns:
             List of all Deviation objects
         """
-        cursor = self.conn.execute(
-            """
-            SELECT id, filename, title, file_path, status,
-                   is_mature, mature_level, mature_classification,
-                   feature, allow_comments, display_resolution,
-                   tags, allow_free_download, add_watermark,
-                   is_ai_generated, noai,
-                   artist_comments, original_url, is_dirty, stack, stackid,
-                   itemid, gallery_id, deviationid, url, error,
-                   created_at, uploaded_at, published_time
-            FROM deviations
-            ORDER BY created_at DESC
-            """
-        )
-        
-        return [self._row_to_deviation(row) for row in cursor.fetchall()]
+        table = DeviationModel.__table__
+        stmt = select(table).order_by(desc(table.c.created_at))
+        return [self._row_to_deviation(dict(r)) for r in self._execute(stmt).mappings().all()]
     
     def recover_uploading_deviations(self) -> int:
         """
@@ -266,70 +189,82 @@ class DeviationRepository(BaseRepository):
         Returns:
             Number of deviations recovered
         """
-        cursor = self.conn.execute(
-            """
-            UPDATE deviations
-            SET status = ?
-            WHERE status = ?
-            """,
-            (UploadStatus.NEW.value, UploadStatus.UPLOADING.value)
+        table = DeviationModel.__table__
+        stmt = (
+            update(table)
+            .where(table.c.status == UploadStatus.UPLOADING.value)
+            .values(status=UploadStatus.NEW.value)
         )
+        result = self._execute(stmt)
         self.conn.commit()
-        return cursor.rowcount
+        return int(result.rowcount or 0)
     
-    def _row_to_deviation(self, row: tuple) -> Deviation:
+    def _row_to_deviation(self, row: dict) -> Deviation:
         """
         Convert database row to Deviation object.
         
         Args:
-            row: Database row tuple
+            row: Database row mapping
             
         Returns:
             Deviation object
         """
         # Parse JSON fields - handle None, empty strings, and invalid JSON
-        mature_class_str = (row[7] or "").strip()
+        mature_class_str = (row.get("mature_classification") or "").strip()
         try:
             mature_classification = json.loads(mature_class_str) if mature_class_str else []
         except json.JSONDecodeError:
             mature_classification = []
         
-        tags_str = (row[11] or "").strip()
+        tags_str = (row.get("tags") or "").strip()
         try:
             tags = json.loads(tags_str) if tags_str else []
         except json.JSONDecodeError:
             tags = []
         
+        def _dt(value: object) -> datetime | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value))
+
+        status_value = row.get("status")
+        try:
+            status = UploadStatus(status_value)
+        except ValueError:
+            status = UploadStatus.NEW
+
         return Deviation(
-            filename=row[1],
-            title=row[2],
-            file_path=row[3],
-            status=UploadStatus(row[4]),
-            is_mature=bool(row[5]),
-            mature_level=row[6],
+            filename=row.get("filename"),
+            title=row.get("title"),
+            file_path=row.get("file_path"),
+            status=status,
+            is_mature=bool(row.get("is_mature")),
+            mature_level=row.get("mature_level"),
             mature_classification=mature_classification,
-            feature=bool(row[8]),
-            allow_comments=bool(row[9]),
-            display_resolution=row[10],
+            feature=bool(row.get("feature")),
+            allow_comments=bool(row.get("allow_comments")),
+            display_resolution=row.get("display_resolution") or 0,
             tags=tags,
-            allow_free_download=bool(row[12]),
-            add_watermark=bool(row[13]),
-            is_ai_generated=bool(row[14]),
-            noai=bool(row[15]),
-            artist_comments=row[16],
-            original_url=row[17],
-            is_dirty=bool(row[18]),
-            stack=row[19],
-            stackid=row[20],
-            itemid=row[21],
-            gallery_id=row[22],
-            deviationid=row[23],
-            url=row[24],
-            error=row[25],
-            created_at=datetime.fromisoformat(row[26]),
-            uploaded_at=datetime.fromisoformat(row[27]) if row[27] else None,
-            published_time=row[28],
-            deviation_id=row[0],
+            allow_free_download=bool(row.get("allow_free_download")),
+            add_watermark=bool(row.get("add_watermark")),
+            is_ai_generated=bool(row.get("is_ai_generated")),
+            noai=bool(row.get("noai")),
+            artist_comments=row.get("artist_comments"),
+            original_url=row.get("original_url"),
+            is_dirty=bool(row.get("is_dirty")),
+            stack=row.get("stack"),
+            stackid=row.get("stackid"),
+            itemid=row.get("itemid"),
+            gallery_id=row.get("gallery_id"),
+            deviationid=row.get("deviationid"),
+            url=row.get("url"),
+            error=row.get("error"),
+            created_at=_dt(row.get("created_at")) or datetime.now(),
+            uploaded_at=_dt(row.get("uploaded_at")),
+            published_time=row.get("published_time"),
+            deviation_id=row.get("id"),
         )
 
     def update_published_time_by_deviationid(
@@ -341,12 +276,11 @@ class DeviationRepository(BaseRepository):
         data from the /deviation/{deviationid} endpoint.
         """
 
-        self.conn.execute(
-            """
-            UPDATE deviations
-            SET published_time = ?
-            WHERE deviationid = ?
-            """,
-            (published_time, deviationid),
+        table = DeviationModel.__table__
+        stmt = (
+            update(table)
+            .where(table.c.deviationid == deviationid)
+            .values(published_time=published_time)
         )
+        self._execute(stmt)
         self.conn.commit()

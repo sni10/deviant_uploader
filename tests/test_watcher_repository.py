@@ -1,25 +1,15 @@
-"""Tests for WatcherRepository."""
+"""Tests for WatcherRepository (PostgreSQL-only)."""
+
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+
 from src.storage.watcher_repository import WatcherRepository
-from src.storage.adapters.sqlalchemy_adapter import SQLAlchemyConnection
-from src.storage.profile_message_tables import metadata as profile_metadata
 
 
 @pytest.fixture
-def watcher_repo():
-    """Create in-memory SQLite WatcherRepository for testing."""
-    engine = create_engine("sqlite:///:memory:")
-    profile_metadata.create_all(engine)
-    
-    SessionFactory = sessionmaker(bind=engine)
-    session = SessionFactory()
-    
-    conn = SQLAlchemyConnection(session)
-    repo = WatcherRepository(conn)
-    yield repo
-    session.close()
+def watcher_repo(db_conn):
+    """Create WatcherRepository bound to isolated PostgreSQL schema."""
+
+    yield WatcherRepository(db_conn)
 
 
 class TestWatcherRepository:

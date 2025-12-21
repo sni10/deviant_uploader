@@ -1,7 +1,9 @@
 """Configuration management for DeviantArt uploader."""
+
 import os
 from pathlib import Path
 from typing import Optional
+
 from dotenv import load_dotenv
 
 
@@ -40,10 +42,7 @@ class Config:
         self.scopes = os.getenv('DA_SCOPES', 'browse stash publish')
         
         # Database configuration
-        self.database_type = os.getenv('DATABASE_TYPE', 'sqlite').lower()
-        database_path_env = os.getenv('DATABASE_PATH', 'data/deviant.db')
-        self.database_path = self._resolve_path(database_path_env)
-        self.database_url = os.getenv('DATABASE_URL', '')
+        self.database_url = self._get_database_url()
         
         # Upload directories (resolve to absolute paths from project root)
         upload_dir_env = os.getenv('UPLOAD_DIR', 'upload')
@@ -68,12 +67,33 @@ class Config:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.done_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
         
         self._initialized = True
         
         # Validate required configuration
         self._validate()
+
+    def _get_database_url(self) -> str:
+        """Return PostgreSQL database URL from env or from DB_* parts.
+
+        Prefers explicit `DATABASE_URL`. If missing, assembles URL from
+        `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`.
+
+        Returns:
+            PostgreSQL SQLAlchemy URL.
+        """
+
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
+            return database_url
+
+        host = os.getenv("DB_HOST", "localhost")
+        port = os.getenv("DB_PORT", "5432")
+        database = os.getenv("DB_DATABASE", "deviant")
+        username = os.getenv("DB_USERNAME", "postgres")
+        password = os.getenv("DB_PASSWORD", "postgres")
+
+        return f"postgresql://{username}:{password}@{host}:{port}/{database}"
     
     def _resolve_path(self, path_str: str) -> Path:
         """
@@ -99,6 +119,11 @@ class Config:
             raise ValueError("DA_CLIENT_ID environment variable is required")
         if not self.client_secret:
             raise ValueError("DA_CLIENT_SECRET environment variable is required")
+
+        if not self.database_url:
+            raise ValueError(
+                "DATABASE_URL (or DB_* variables) is required for PostgreSQL"
+            )
     
     @classmethod
     def get_instance(cls) -> 'Config':

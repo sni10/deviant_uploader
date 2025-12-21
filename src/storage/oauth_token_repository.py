@@ -2,7 +2,10 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import delete, desc, insert, select
+
 from .base_repository import BaseRepository
+from .models import OAuthToken as OAuthTokenModel
 
 
 class OAuthTokenRepository(BaseRepository):
@@ -35,29 +38,28 @@ class OAuthTokenRepository(BaseRepository):
             Token ID
         """
         expires_at = datetime.now() + timedelta(seconds=expires_in)
-        
+
+        table = OAuthTokenModel.__table__
+
         # Delete old tokens (we only keep the latest)
-        self.conn.execute("DELETE FROM oauth_tokens")
-        
-        cursor = self.conn.execute(
-            """
-            INSERT INTO oauth_tokens (
-                access_token, refresh_token, token_type, expires_at, scope,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                access_token,
-                refresh_token,
-                token_type,
-                expires_at.isoformat(),
-                scope,
-                datetime.now().isoformat(),
-                datetime.now().isoformat()
+        self._execute(delete(table))
+
+        stmt = (
+            insert(table)
+            .values(
+                user_id=None,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_type=token_type,
+                expires_at=expires_at,
+                scope=scope,
             )
+            .returning(table.c.id)
         )
+
+        token_id = int(self._execute(stmt).scalar_one())
         self.conn.commit()
-        return cursor.lastrowid
+        return token_id
     
     def get_token(self) -> Optional[dict]:
         """
@@ -67,25 +69,35 @@ class OAuthTokenRepository(BaseRepository):
             Token dict with keys: access_token, refresh_token, expires_at, token_type, scope
             None if no token exists
         """
-        cursor = self.conn.execute(
-            """
-            SELECT access_token, refresh_token, token_type, expires_at, scope
-            FROM oauth_tokens
-            ORDER BY id DESC
-            LIMIT 1
-            """
+        table = OAuthTokenModel.__table__
+        stmt = (
+            select(
+                table.c.access_token,
+                table.c.refresh_token,
+                table.c.token_type,
+                table.c.expires_at,
+                table.c.scope,
+            )
+            .order_by(desc(table.c.id))
+            .limit(1)
         )
-        row = cursor.fetchone()
-        
-        if not row:
+
+        row = self._execute(stmt).mappings().first()
+        if row is None:
             return None
-        
+
+        expires_value = row.get("expires_at")
+        if isinstance(expires_value, datetime):
+            expires_dt = expires_value
+        else:
+            expires_dt = datetime.fromisoformat(str(expires_value))
+
         return {
-            "access_token": row[0],
-            "refresh_token": row[1],
-            "token_type": row[2],
-            "expires_at": datetime.fromisoformat(row[3]),
-            "scope": row[4]
+            "access_token": row.get("access_token"),
+            "refresh_token": row.get("refresh_token"),
+            "token_type": row.get("token_type"),
+            "expires_at": expires_dt,
+            "scope": row.get("scope"),
         }
     
     def is_token_expired(self) -> bool:

@@ -18,13 +18,18 @@ class FeedDeviationRepository(BaseRepository):
 
         Handles both SQLAlchemy connections and raw SQLite connections.
         """
-        # Check if this is SQLAlchemy connection (has _session attribute)
-        if hasattr(self.conn, '_session'):
-            return self.conn._session.execute(statement)
-        else:
-            # For SQLite adapter, compile to SQL string
-            compiled = statement.compile(compile_kwargs={"literal_binds": True})
-            return self.conn.execute(str(compiled))
+        # Preferred path: use connection wrapper `.execute()`.
+        # This keeps thread-safety guarantees (lock) and schema/search_path setup.
+        if hasattr(self.conn, "execute"):
+            try:
+                return self.conn.execute(statement)
+            except TypeError:
+                # Fallback for legacy adapters that expect SQL string
+                pass
+
+        # Legacy fallback (kept only for backward compatibility)
+        compiled = statement.compile(compile_kwargs={"literal_binds": True})
+        return self.conn.execute(str(compiled))
 
     def _scalar(self, statement) -> int | str | None:
         """Execute statement and return first column of the first row.
