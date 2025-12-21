@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     name TEXT NOT NULL,
     parent TEXT,
     size INTEGER,
+    sync_enabled INTEGER DEFAULT 1 NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -382,7 +383,18 @@ def _migrate_database(conn: sqlite3.Connection) -> None:
             logger.info("Migration: Added column galleries.user_id")
         except sqlite3.OperationalError as e:
             logger.warning(f"Could not add column galleries.user_id: {e}")
-    
+
+    # Check and add sync_enabled to galleries
+    cursor = conn.execute("PRAGMA table_info(galleries)")
+    gallery_columns = {row[1] for row in cursor.fetchall()}
+    if 'sync_enabled' not in gallery_columns:
+        try:
+            conn.execute("ALTER TABLE galleries ADD COLUMN sync_enabled INTEGER DEFAULT 1 NOT NULL")
+            conn.commit()
+            logger.info("Migration: Added column galleries.sync_enabled")
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Could not add column galleries.sync_enabled: {e}")
+
     # Check and add user_id to deviations (refresh column list first)
     cursor = conn.execute("PRAGMA table_info(deviations)")
     deviation_columns = {row[1] for row in cursor.fetchall()}

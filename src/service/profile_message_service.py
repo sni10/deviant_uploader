@@ -13,6 +13,7 @@ from ..storage.profile_message_log_repository import ProfileMessageLogRepository
 from ..storage.watcher_repository import WatcherRepository
 from ..domain.models import MessageLogStatus
 from .message_randomizer import randomize_template
+from .http_client import DeviantArtHttpClient
 
 
 class ProfileMessageService:
@@ -20,10 +21,7 @@ class ProfileMessageService:
 
     WATCHERS_URL = "https://www.deviantart.com/api/v1/oauth2/user/watchers/{username}"
     PROFILE_COMMENT_URL = "https://www.deviantart.com/api/v1/oauth2/comments/post/profile/{username}"
-    
-    # Retry configuration
-    MAX_RETRIES = 3
-    BASE_RETRY_DELAY = 5  # seconds
+    MAX_CONSECUTIVE_FAILURES = 5  # Stop worker after this many consecutive failures
 
     def __init__(
         self,
@@ -31,11 +29,13 @@ class ProfileMessageService:
         log_repo: ProfileMessageLogRepository,
         watcher_repo: WatcherRepository,
         logger: Logger,
+        http_client: Optional[DeviantArtHttpClient] = None,
     ) -> None:
         self.message_repo = message_repo
         self.log_repo = log_repo
         self.watcher_repo = watcher_repo
         self.logger = logger
+        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
 
         # Worker state
         self._worker_thread: Optional[threading.Thread] = None
@@ -45,39 +45,14 @@ class ProfileMessageService:
             "processed": 0,
             "errors": 0,
             "last_error": None,
+            "consecutive_failures": 0,
         }
         self._stats_lock = threading.Lock()
 
         # Watchers queue (filled by fetch_watchers)
-        # Each item: {"username": str, "userid": str, "selected": bool, "retry_count": int}
+        # Each item: {"username": str, "userid": str, "selected": bool}
         self._watchers_queue: list[dict] = []
         self._queue_lock = threading.Lock()
-
-    # ========== Retry Helpers ==========
-
-    def _should_retry(self, watcher: dict) -> bool:
-        """Check if watcher should be retried based on retry count.
-
-        Args:
-            watcher: Watcher dictionary with retry_count field
-
-        Returns:
-            True if retry_count < MAX_RETRIES, False otherwise
-        """
-        retry_count = watcher.get("retry_count", 0)
-        return retry_count < self.MAX_RETRIES
-
-    def _calculate_backoff_delay(self, retry_count: int) -> int:
-        """Calculate exponential backoff delay for retry.
-
-        Args:
-            retry_count: Current retry count
-
-        Returns:
-            Delay in seconds (BASE_RETRY_DELAY * 2^retry_count, capped at 60)
-        """
-        delay = self.BASE_RETRY_DELAY * (2 ** retry_count)
-        return min(delay, 60)  # Cap at 60 seconds
 
     # ========== Watchers Collection ==========
 
@@ -115,8 +90,7 @@ class ProfileMessageService:
 
             try:
                 url = self.WATCHERS_URL.format(username=username)
-                response = requests.get(url, params=params, timeout=30)
-                response.raise_for_status()
+                response = self.http_client.get(url, params=params, timeout=30)
                 data = response.json()
             except requests.RequestException as e:
                 self.logger.error("Watchers fetch failed: %s", e)
@@ -133,7 +107,6 @@ class ProfileMessageService:
                         "username": watcher_username,
                         "userid": watcher_userid,
                         "selected": True,  # Selected by default
-                        "retry_count": 0,
                     })
 
                     # Save to database
@@ -244,7 +217,12 @@ class ProfileMessageService:
 
         self._stop_flag.clear()
         with self._stats_lock:
-            self._worker_stats = {"processed": 0, "errors": 0, "last_error": None}
+            self._worker_stats = {
+                "processed": 0,
+                "errors": 0,
+                "last_error": None,
+                "consecutive_failures": 0,
+            }
 
         self._worker_thread = threading.Thread(
             target=self._worker_loop,
@@ -303,6 +281,7 @@ class ProfileMessageService:
                 "processed": self._worker_stats["processed"],
                 "errors": self._worker_stats["errors"],
                 "last_error": self._worker_stats["last_error"],
+                "consecutive_failures": self._worker_stats["consecutive_failures"],
                 "queue_remaining": queue_remaining,
                 "send_stats": send_stats,
             }
@@ -580,7 +559,6 @@ class ProfileMessageService:
                         "username": username,
                         "userid": userid,
                         "selected": True,
-                        "retry_count": 0,
                     }
                 )
                 existing_usernames.add(username)
@@ -637,178 +615,73 @@ class ProfileMessageService:
                     break
 
                 try:
-                    # Post comment to profile
+                    # Post comment to profile (HTTP client handles retry automatically)
                     url = self.PROFILE_COMMENT_URL.format(username=username)
-                    response = requests.post(
+                    response = self.http_client.post(
                         url,
                         data={"body": message_body, "access_token": access_token},
                         timeout=30,
                     )
 
-                    if response.status_code == 200:
-                        # Success
-                        response_data = response.json()
-                        commentid = response_data.get("commentid")
+                    # Success - HTTP client only returns response if successful
+                    response_data = response.json()
+                    commentid = response_data.get("commentid")
 
-                        self.log_repo.add_log(
-                            message_id=message_id,
-                            recipient_username=username,
-                            recipient_userid=userid,
-                            status=MessageLogStatus.SENT,
-                            commentid=commentid,
-                        )
+                    self.log_repo.add_log(
+                        message_id=message_id,
+                        recipient_username=username,
+                        recipient_userid=userid,
+                        status=MessageLogStatus.SENT,
+                        commentid=commentid,
+                    )
 
-                        with self._stats_lock:
-                            self._worker_stats["processed"] += 1
+                    with self._stats_lock:
+                        self._worker_stats["processed"] += 1
+                        self._worker_stats["consecutive_failures"] = 0  # Reset on success
 
-                        self.logger.info(
-                            "Sent comment to %s (commentid=%s)", username, commentid
-                        )
+                    self.logger.info(
+                        "Sent comment to %s (commentid=%s)", username, commentid
+                    )
 
-                        # Random delay to avoid rate limiting
-                        time.sleep(random.uniform(3, 8))
-
-                    elif response.status_code == 429:
-                        # Rate limited - check Retry-After header
-                        retry_after = response.headers.get("Retry-After")
-                        if retry_after:
-                            try:
-                                delay = int(retry_after)
-                                delay = min(delay, 60)  # Cap at 60 seconds
-                            except ValueError:
-                                delay = 10
-                        else:
-                            delay = 10
-
-                        # Return watcher to queue
-                        with self._queue_lock:
-                            self._watchers_queue.insert(0, watcher)
-
-                        self.logger.warning(
-                            "Rate limited for %s, backing off for %s seconds",
-                            username,
-                            delay,
-                        )
-                        time.sleep(delay)
-
-                    elif response.status_code in (400, 503):
-                        # Temporary errors - retry with backoff
-                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
-                        retry_count = watcher.get("retry_count", 0)
-
-                        if self._should_retry(watcher):
-                            # Increment retry count and return to queue
-                            watcher["retry_count"] = retry_count + 1
-                            
-                            # Check for Retry-After header (especially for 503)
-                            retry_after = response.headers.get("Retry-After")
-                            if retry_after:
-                                try:
-                                    delay = int(retry_after)
-                                    delay = min(delay, 60)  # Cap at 60 seconds
-                                except ValueError:
-                                    delay = self._calculate_backoff_delay(retry_count)
-                            else:
-                                delay = self._calculate_backoff_delay(retry_count)
-
-                            with self._queue_lock:
-                                self._watchers_queue.insert(0, watcher)
-
-                            self.logger.warning(
-                                "HTTP %s for %s (attempt %s/%s), retrying in %s seconds",
-                                response.status_code,
-                                username,
-                                retry_count + 1,
-                                self.MAX_RETRIES,
-                                delay,
-                            )
-                            time.sleep(delay)
-                        else:
-                            # Max retries exceeded - log as failed
-                            self.log_repo.add_log(
-                                message_id=message_id,
-                                recipient_username=username,
-                                recipient_userid=userid,
-                                status=MessageLogStatus.FAILED,
-                                error_message=f"{error_msg} (max retries exceeded)",
-                            )
-
-                            with self._stats_lock:
-                                self._worker_stats["errors"] += 1
-                                self._worker_stats["last_error"] = error_msg
-
-                            self.logger.error(
-                                "Failed to send to %s after %s retries: %s",
-                                username,
-                                self.MAX_RETRIES,
-                                error_msg,
-                            )
-                            time.sleep(2)
-
-                    else:
-                        # Other HTTP errors (500, 502, etc.) - log as failed without retry
-                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
-
-                        self.log_repo.add_log(
-                            message_id=message_id,
-                            recipient_username=username,
-                            recipient_userid=userid,
-                            status=MessageLogStatus.FAILED,
-                            error_message=error_msg,
-                        )
-
-                        with self._stats_lock:
-                            self._worker_stats["errors"] += 1
-                            self._worker_stats["last_error"] = error_msg
-
-                        self.logger.error(
-                            "Failed to send to %s: %s", username, error_msg
-                        )
-                        time.sleep(2)
+                    # Random delay to avoid rate limiting
+                    time.sleep(random.uniform(3, 8))
 
                 except requests.RequestException as e:
-                    # Network error - retry with backoff
-                    error_msg = f"Network error: {str(e)}"
-                    retry_count = watcher.get("retry_count", 0)
+                    # HTTP client already retried - this is final failure
+                    error_msg = f"Request failed after retries: {str(e)}"
 
-                    if self._should_retry(watcher):
-                        # Increment retry count and return to queue
-                        watcher["retry_count"] = retry_count + 1
-                        delay = self._calculate_backoff_delay(retry_count)
+                    self.log_repo.add_log(
+                        message_id=message_id,
+                        recipient_username=username,
+                        recipient_userid=userid,
+                        status=MessageLogStatus.FAILED,
+                        error_message=error_msg,
+                    )
 
-                        with self._queue_lock:
-                            self._watchers_queue.insert(0, watcher)
+                    with self._stats_lock:
+                        self._worker_stats["errors"] += 1
+                        self._worker_stats["consecutive_failures"] += 1
+                        self._worker_stats["last_error"] = error_msg
+                        consecutive_failures = self._worker_stats["consecutive_failures"]
 
-                        self.logger.warning(
-                            "Network error for %s (attempt %s/%s), retrying in %s seconds: %s",
-                            username,
-                            retry_count + 1,
-                            self.MAX_RETRIES,
-                            delay,
-                            str(e),
+                    self.logger.error(
+                        "Failed to send to %s: %s (consecutive failures: %d/%d)",
+                        username,
+                        str(e),
+                        consecutive_failures,
+                        self.MAX_CONSECUTIVE_FAILURES,
+                    )
+
+                    # Stop worker if too many consecutive failures
+                    if consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
+                        self.logger.critical(
+                            "Worker stopped: %d consecutive failures reached (limit: %d)",
+                            consecutive_failures,
+                            self.MAX_CONSECUTIVE_FAILURES,
                         )
-                        time.sleep(delay)
-                    else:
-                        # Max retries exceeded - log as failed
-                        self.log_repo.add_log(
-                            message_id=message_id,
-                            recipient_username=username,
-                            recipient_userid=userid,
-                            status=MessageLogStatus.FAILED,
-                            error_message=f"{error_msg} (max retries exceeded)",
-                        )
+                        break
 
-                        with self._stats_lock:
-                            self._worker_stats["errors"] += 1
-                            self._worker_stats["last_error"] = error_msg
-
-                        self.logger.error(
-                            "Network error for %s after %s retries: %s",
-                            username,
-                            self.MAX_RETRIES,
-                            str(e),
-                        )
-                        time.sleep(5)
+                    time.sleep(2)
 
                 except Exception as e:
                     # Unexpected error - log and continue

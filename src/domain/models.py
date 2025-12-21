@@ -46,7 +46,8 @@ class Gallery:
     name: str
     parent: Optional[str] = None  # Parent folder UUID
     size: Optional[int] = None  # Number of deviations in folder
-    
+    sync_enabled: bool = True  # Whether to sync this gallery
+
     # Database fields
     gallery_db_id: Optional[int] = None  # Internal DB identifier
     created_at: datetime = field(default_factory=datetime.now)

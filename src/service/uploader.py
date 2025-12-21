@@ -12,6 +12,7 @@ from ..domain.models import Deviation, UploadStatus, UploadPreset
 from ..storage import DeviationRepository, GalleryRepository
 from ..storage.preset_repository import PresetRepository
 from .auth_service import AuthService
+from .http_client import DeviantArtHttpClient
 
 
 class UploaderService:
@@ -31,7 +32,8 @@ class UploaderService:
         gallery_repository: GalleryRepository,
         auth_service: AuthService,
         preset_repository: Optional[PresetRepository] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        http_client: Optional[DeviantArtHttpClient] = None,
     ):
         """
         Initialize uploader service.
@@ -42,6 +44,7 @@ class UploaderService:
             auth_service: Authentication service
             preset_repository: Repository for preset management (optional)
             logger: Logger instance
+            http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.config = get_config()
         self.deviation_repository = deviation_repository
@@ -49,6 +52,7 @@ class UploaderService:
         self.auth_service = auth_service
         self.preset_repository = preset_repository
         self.logger = logger or logging.getLogger(__name__)
+        self.http_client = http_client or DeviantArtHttpClient(logger=self.logger)
     
     def scan_upload_folder(self) -> list[Path]:
         """
@@ -304,12 +308,11 @@ class UploaderService:
                     'file': (file_path.name, f, self._get_content_type(file_path))
                 }
                 
-                response = requests.post(
+                response = self.http_client.post(
                     self.config.api_stash_submit_url,
                     data=data,
                     files=files
                 )
-                response.raise_for_status()
             
             result = response.json()
             
@@ -418,20 +421,11 @@ class UploaderService:
         
         try:
             self.logger.info(f"Publishing deviation with itemid={deviation.itemid}")
-            response = requests.post(
+            response = self.http_client.post(
                 self.config.api_stash_publish_url,
                 data=params,
                 timeout=60,
             )
-            # Do not raise yet; we want to log error body on non-200
-            if not response.ok:
-                try:
-                    body = response.text[:500]
-                except Exception:
-                    body = '<no body>'
-                self.logger.error(f"Publish HTTP error {response.status_code}: {body}")
-                response.raise_for_status()
-            
             result = response.json()
             
             if result.get('status') == 'success':

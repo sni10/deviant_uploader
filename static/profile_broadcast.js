@@ -238,7 +238,7 @@
             ${w.selected ? "checked" : ""}
             onchange="toggleSavedWatcherByIndex(${index}, this.checked)">
         </td>
-        <td>${escapeHtml(w.username)}</td>
+        <td><a href="https://www.deviantart.com/${escapeHtml(w.username)}" target="_blank">${escapeHtml(w.username)}</a></td>
         <td>${escapeHtml(w.userid)}</td>
         <td>${formatFetchedAt(w.fetched_at)}</td>
       </tr>
@@ -401,7 +401,7 @@
               ${w.selected ? "checked" : ""}
               onchange="toggleWatcher('${escapeHtml(w.username)}', this.checked)">
           </td>
-          <td>${escapeHtml(w.username)}</td>
+          <td><a href="https://www.deviantart.com/${escapeHtml(w.username)}" target="_blank">${escapeHtml(w.username)}</a></td>
           <td>${escapeHtml(w.userid)}</td>
         </tr>
       `

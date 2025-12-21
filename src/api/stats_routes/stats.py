@@ -94,6 +94,7 @@ def register_stats_routes(
                                 "name": gallery.name,
                                 "size": gallery.size,
                                 "parent": gallery.parent,
+                                "sync_enabled": gallery.sync_enabled,
                             }
                             for gallery in galleries
                         ],
@@ -102,6 +103,36 @@ def register_stats_routes(
             )
         except Exception as exc:  # noqa: BLE001
             g.logger.error("Failed to fetch options", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/galleries/<folderid>/sync", methods=["PUT"])
+    def update_gallery_sync(folderid):
+        """Update sync_enabled flag for a gallery."""
+        try:
+            data = request.get_json()
+            if not data or "sync_enabled" not in data:
+                return jsonify({"success": False, "error": "sync_enabled is required"}), 400
+
+            sync_enabled = bool(data["sync_enabled"])
+
+            (
+                _user_repo,
+                _token_repo,
+                gallery_repo,
+                _deviation_repo,
+                _deviation_stats_repo,
+                _stats_snapshot_repo,
+                _user_stats_snapshot_repo,
+                _deviation_metadata_repo,
+            ) = get_repositories()
+
+            success = gallery_repo.update_sync_enabled(folderid, sync_enabled)
+            if not success:
+                return jsonify({"success": False, "error": "Gallery not found"}), 404
+
+            return jsonify({"success": True, "data": {"folderid": folderid, "sync_enabled": sync_enabled}})
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to update gallery sync setting", exc_info=exc)
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @app.route("/api/user_stats/latest", methods=["GET"])

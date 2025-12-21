@@ -66,14 +66,14 @@
 
   async function syncStats() {
     const username = document.getElementById("user-select").value;
-    const galleries = optionsCache.galleries || [];
+    const galleries = (optionsCache.galleries || []).filter(g => g.sync_enabled);
 
     if (galleries.length === 0) {
-      setStatus("No galleries available to sync", "error");
+      setStatus("No galleries selected to sync", "error");
       return;
     }
 
-    setStatus(`Syncing ${galleries.length} galleries...`);
+    setStatus(`Syncing ${galleries.length} selected galleries...`);
 
     let syncedCount = 0;
     let errorCount = 0;
@@ -148,6 +148,123 @@
     }
   }
 
+  function renderGalleries() {
+    const container = document.getElementById("galleries-list");
+    const galleries = optionsCache.galleries || [];
+
+    if (galleries.length === 0) {
+      container.innerHTML = '<p class="text-muted small">No galleries available</p>';
+      return;
+    }
+
+    container.innerHTML = galleries
+      .map(
+        (g) => `
+        <div class="col-md-4 col-lg-3">
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="gallery-${g.folderid}"
+              ${g.sync_enabled ? 'checked' : ''}
+              onchange="toggleGallerySync('${g.folderid}', this.checked)"
+            >
+            <label class="form-check-label small" for="gallery-${g.folderid}">
+              ${g.name || 'Unnamed'} ${g.size ? `(${g.size})` : ''}
+            </label>
+          </div>
+        </div>
+      `
+      )
+      .join("");
+  }
+
+  async function toggleGallerySync(folderid, syncEnabled) {
+    try {
+      const resp = await fetch(`/api/galleries/${folderid}/sync`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_enabled: syncEnabled }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error || "Failed to update gallery");
+
+      // Update cache
+      const gallery = optionsCache.galleries.find((g) => g.folderid === folderid);
+      if (gallery) {
+        gallery.sync_enabled = syncEnabled;
+      }
+
+      setStatus(
+        `Gallery sync ${syncEnabled ? 'enabled' : 'disabled'}`,
+        "success"
+      );
+    } catch (e) {
+      setStatus("Error updating gallery: " + e.message, "error");
+      // Reload to restore state
+      await loadOptions();
+    }
+  }
+
+  async function selectAllGalleries() {
+    const galleries = optionsCache.galleries || [];
+    if (galleries.length === 0) return;
+
+    setStatus(`Selecting all ${galleries.length} galleries...`);
+
+    try {
+      // Update all galleries in parallel
+      await Promise.all(
+        galleries.map(async (g) => {
+          if (!g.sync_enabled) {
+            await fetch(`/api/galleries/${g.folderid}/sync`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sync_enabled: true }),
+            });
+            g.sync_enabled = true;
+          }
+        })
+      );
+
+      renderGalleries();
+      setStatus(`Selected all ${galleries.length} galleries`, "success");
+    } catch (e) {
+      setStatus("Error selecting all galleries: " + e.message, "error");
+      await loadOptions();
+    }
+  }
+
+  async function deselectAllGalleries() {
+    const galleries = optionsCache.galleries || [];
+    if (galleries.length === 0) return;
+
+    setStatus(`Deselecting all ${galleries.length} galleries...`);
+
+    try {
+      // Update all galleries in parallel
+      await Promise.all(
+        galleries.map(async (g) => {
+          if (g.sync_enabled) {
+            await fetch(`/api/galleries/${g.folderid}/sync`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sync_enabled: false }),
+            });
+            g.sync_enabled = false;
+          }
+        })
+      );
+
+      renderGalleries();
+      setStatus(`Deselected all ${galleries.length} galleries`, "success");
+    } catch (e) {
+      setStatus("Error deselecting all galleries: " + e.message, "error");
+      await loadOptions();
+    }
+  }
+
   async function loadOptions() {
     setStatus("Loading options...");
     try {
@@ -160,6 +277,8 @@
         value: u.username,
         label: `${u.username}`,
       }));
+
+      renderGalleries();
 
       setStatus("Options loaded", "success");
     } catch (e) {
@@ -322,4 +441,7 @@
   window.loadStats = loadStats;
   window.combinedSort = combinedSort;
   window.sortBy = sortBy;
+  window.toggleGallerySync = toggleGallerySync;
+  window.selectAllGalleries = selectAllGalleries;
+  window.deselectAllGalleries = deselectAllGalleries;
 })();

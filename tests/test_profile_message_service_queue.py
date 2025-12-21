@@ -144,15 +144,33 @@ class TestProfileMessageServiceQueue:
 
     @patch("src.service.profile_message_service.random.uniform", return_value=0)
     @patch("src.service.profile_message_service.time.sleep", return_value=None)
-    @patch("src.service.profile_message_service.requests.post")
     def test_worker_stops_when_queue_exhausted(
         self,
-        post_mock: MagicMock,
         _sleep_mock: MagicMock,
         _uniform_mock: MagicMock,
     ) -> None:
         """Worker must stop on its own when no selected watchers remain."""
-        service = self._create_service()
+        # Create mock http_client
+        http_client = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"commentid": "cid"}
+        http_client.post.return_value = resp
+
+        # Create service with mock http_client
+        message_repo = MagicMock()
+        log_repo = MagicMock()
+        log_repo.get_stats.return_value = {"sent": 0, "failed": 0}
+        watcher_repo = MagicMock()
+        logger = MagicMock()
+
+        service = ProfileMessageService(
+            message_repo=message_repo,
+            log_repo=log_repo,
+            watcher_repo=watcher_repo,
+            logger=logger,
+            http_client=http_client,
+        )
 
         # One selected watcher in queue
         service._watchers_queue = [{"username": "u", "userid": "1", "selected": True}]
@@ -163,12 +181,6 @@ class TestProfileMessageServiceQueue:
         message.is_active = True
         message.body = "Hello"
         service.message_repo.get_active_messages.return_value = [message]
-
-        # Successful HTTP response
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"commentid": "cid"}
-        post_mock.return_value = resp
 
         result = service.start_worker(access_token="token")
         assert result["success"] is True
