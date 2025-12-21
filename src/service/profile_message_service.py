@@ -12,6 +12,7 @@ from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
 from ..storage.watcher_repository import WatcherRepository
 from ..domain.models import MessageLogStatus
+from .message_randomizer import randomize_template
 
 
 class ProfileMessageService:
@@ -19,6 +20,10 @@ class ProfileMessageService:
 
     WATCHERS_URL = "https://www.deviantart.com/api/v1/oauth2/user/watchers/{username}"
     PROFILE_COMMENT_URL = "https://www.deviantart.com/api/v1/oauth2/comments/post/profile/{username}"
+    
+    # Retry configuration
+    MAX_RETRIES = 3
+    BASE_RETRY_DELAY = 5  # seconds
 
     def __init__(
         self,
@@ -44,9 +49,35 @@ class ProfileMessageService:
         self._stats_lock = threading.Lock()
 
         # Watchers queue (filled by fetch_watchers)
-        # Each item: {"username": str, "userid": str, "selected": bool}
+        # Each item: {"username": str, "userid": str, "selected": bool, "retry_count": int}
         self._watchers_queue: list[dict] = []
         self._queue_lock = threading.Lock()
+
+    # ========== Retry Helpers ==========
+
+    def _should_retry(self, watcher: dict) -> bool:
+        """Check if watcher should be retried based on retry count.
+
+        Args:
+            watcher: Watcher dictionary with retry_count field
+
+        Returns:
+            True if retry_count < MAX_RETRIES, False otherwise
+        """
+        retry_count = watcher.get("retry_count", 0)
+        return retry_count < self.MAX_RETRIES
+
+    def _calculate_backoff_delay(self, retry_count: int) -> int:
+        """Calculate exponential backoff delay for retry.
+
+        Args:
+            retry_count: Current retry count
+
+        Returns:
+            Delay in seconds (BASE_RETRY_DELAY * 2^retry_count, capped at 60)
+        """
+        delay = self.BASE_RETRY_DELAY * (2 ** retry_count)
+        return min(delay, 60)  # Cap at 60 seconds
 
     # ========== Watchers Collection ==========
 
@@ -102,6 +133,7 @@ class ProfileMessageService:
                         "username": watcher_username,
                         "userid": watcher_userid,
                         "selected": True,  # Selected by default
+                        "retry_count": 0,
                     })
 
                     # Save to database
@@ -133,6 +165,16 @@ class ProfileMessageService:
 
         self.logger.info("Fetched %s watchers for %s", watchers_fetched, username)
 
+        # Synchronize database: remove watchers who unfollowed
+        if watchers_list:
+            current_usernames = [w["username"] for w in watchers_list]
+            try:
+                deleted_count = self.watcher_repo.delete_watchers_not_in_list(current_usernames)
+                if deleted_count > 0:
+                    self.logger.info("Removed %s unfollowed watchers from database", deleted_count)
+            except Exception as e:
+                self.logger.warning("Failed to synchronize watchers: %s", e)
+
         # Store in queue
         with self._queue_lock:
             self._watchers_queue = watchers_list
@@ -144,16 +186,42 @@ class ProfileMessageService:
 
     # ========== Worker ==========
 
+    def _get_randomized_message(self) -> tuple[int | None, str | None]:
+        """Get a random active message template and randomize it.
+
+        Returns:
+            Tuple of (message_id, randomized_body) or (None, None) if no active templates
+        """
+        active_messages = self.message_repo.get_active_messages()
+        
+        if not active_messages:
+            self.logger.warning("No active message templates found")
+            return None, None
+        
+        # Select random active template
+        selected_message = random.choice(active_messages)
+        
+        # Randomize the template body
+        randomized_body = randomize_template(selected_message.body)
+        
+        self.logger.debug(
+            "Selected template %s: '%s' -> '%s'",
+            selected_message.message_id,
+            selected_message.body[:50],
+            randomized_body[:50],
+        )
+        
+        return selected_message.message_id, randomized_body
+
     def _is_worker_alive(self) -> bool:
         """Return True if the background worker thread is alive."""
         return bool(self._worker_thread and self._worker_thread.is_alive())
 
-    def start_worker(self, access_token: str, message_id: int) -> dict:
+    def start_worker(self, access_token: str) -> dict:
         """Start background worker thread.
 
         Args:
             access_token: OAuth access token for posting comments
-            message_id: Message template ID to send
 
         Returns:
             Status dictionary: {success, message}
@@ -169,13 +237,10 @@ class ProfileMessageService:
             if not self._watchers_queue:
                 return {"success": False, "message": "No watchers in queue. Fetch watchers first."}
 
-        # Get message template
-        message = self.message_repo.get_message_by_id(message_id)
-        if not message:
-            return {"success": False, "message": f"Message template {message_id} not found"}
-
-        if not message.is_active:
-            return {"success": False, "message": "Message template is not active"}
+        # Check if there are active message templates
+        active_messages = self.message_repo.get_active_messages()
+        if not active_messages:
+            return {"success": False, "message": "No active message templates found. Please activate at least one template."}
 
         self._stop_flag.clear()
         with self._stats_lock:
@@ -183,13 +248,13 @@ class ProfileMessageService:
 
         self._worker_thread = threading.Thread(
             target=self._worker_loop,
-            args=(access_token, message_id, message.body),
+            args=(access_token,),
             daemon=True,
         )
         self._worker_running = True
         self._worker_thread.start()
 
-        self.logger.info("Worker thread started for message_id=%s", message_id)
+        self.logger.info("Worker thread started with %s active templates", len(active_messages))
         return {"success": True, "message": "Worker started"}
 
     def stop_worker(self) -> dict:
@@ -515,6 +580,7 @@ class ProfileMessageService:
                         "username": username,
                         "userid": userid,
                         "selected": True,
+                        "retry_count": 0,
                     }
                 )
                 existing_usernames.add(username)
@@ -535,9 +601,9 @@ class ProfileMessageService:
             "invalid_count": invalid_count,
         }
 
-    def _worker_loop(self, access_token: str, message_id: int, message_body: str) -> None:
+    def _worker_loop(self, access_token: str) -> None:
         """Background worker loop (runs in separate thread)."""
-        self.logger.info("Worker loop started for message_id=%s", message_id)
+        self.logger.info("Worker loop started with randomized message templates")
         try:
             while not self._stop_flag.is_set():
                 # Get next selected watcher from queue
@@ -562,6 +628,13 @@ class ProfileMessageService:
                 if not username or not userid:
                     self.logger.warning("Invalid watcher data: %s", watcher)
                     continue
+
+                # Get randomized message for this send
+                message_id, message_body = self._get_randomized_message()
+                
+                if not message_id or not message_body:
+                    self.logger.error("Failed to get randomized message, stopping worker")
+                    break
 
                 try:
                     # Post comment to profile
@@ -618,8 +691,62 @@ class ProfileMessageService:
                         )
                         time.sleep(delay)
 
+                    elif response.status_code in (400, 503):
+                        # Temporary errors - retry with backoff
+                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                        retry_count = watcher.get("retry_count", 0)
+
+                        if self._should_retry(watcher):
+                            # Increment retry count and return to queue
+                            watcher["retry_count"] = retry_count + 1
+                            
+                            # Check for Retry-After header (especially for 503)
+                            retry_after = response.headers.get("Retry-After")
+                            if retry_after:
+                                try:
+                                    delay = int(retry_after)
+                                    delay = min(delay, 60)  # Cap at 60 seconds
+                                except ValueError:
+                                    delay = self._calculate_backoff_delay(retry_count)
+                            else:
+                                delay = self._calculate_backoff_delay(retry_count)
+
+                            with self._queue_lock:
+                                self._watchers_queue.insert(0, watcher)
+
+                            self.logger.warning(
+                                "HTTP %s for %s (attempt %s/%s), retrying in %s seconds",
+                                response.status_code,
+                                username,
+                                retry_count + 1,
+                                self.MAX_RETRIES,
+                                delay,
+                            )
+                            time.sleep(delay)
+                        else:
+                            # Max retries exceeded - log as failed
+                            self.log_repo.add_log(
+                                message_id=message_id,
+                                recipient_username=username,
+                                recipient_userid=userid,
+                                status=MessageLogStatus.FAILED,
+                                error_message=f"{error_msg} (max retries exceeded)",
+                            )
+
+                            with self._stats_lock:
+                                self._worker_stats["errors"] += 1
+                                self._worker_stats["last_error"] = error_msg
+
+                            self.logger.error(
+                                "Failed to send to %s after %s retries: %s",
+                                username,
+                                self.MAX_RETRIES,
+                                error_msg,
+                            )
+                            time.sleep(2)
+
                     else:
-                        # Other error - log as failed
+                        # Other HTTP errors (500, 502, etc.) - log as failed without retry
                         error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
 
                         self.log_repo.add_log(
@@ -640,23 +767,48 @@ class ProfileMessageService:
                         time.sleep(2)
 
                 except requests.RequestException as e:
-                    # Network error - log as failed
+                    # Network error - retry with backoff
                     error_msg = f"Network error: {str(e)}"
+                    retry_count = watcher.get("retry_count", 0)
 
-                    self.log_repo.add_log(
-                        message_id=message_id,
-                        recipient_username=username,
-                        recipient_userid=userid,
-                        status=MessageLogStatus.FAILED,
-                        error_message=error_msg,
-                    )
+                    if self._should_retry(watcher):
+                        # Increment retry count and return to queue
+                        watcher["retry_count"] = retry_count + 1
+                        delay = self._calculate_backoff_delay(retry_count)
 
-                    with self._stats_lock:
-                        self._worker_stats["errors"] += 1
-                        self._worker_stats["last_error"] = error_msg
+                        with self._queue_lock:
+                            self._watchers_queue.insert(0, watcher)
 
-                    self.logger.error("Network error for %s: %s", username, e)
-                    time.sleep(5)
+                        self.logger.warning(
+                            "Network error for %s (attempt %s/%s), retrying in %s seconds: %s",
+                            username,
+                            retry_count + 1,
+                            self.MAX_RETRIES,
+                            delay,
+                            str(e),
+                        )
+                        time.sleep(delay)
+                    else:
+                        # Max retries exceeded - log as failed
+                        self.log_repo.add_log(
+                            message_id=message_id,
+                            recipient_username=username,
+                            recipient_userid=userid,
+                            status=MessageLogStatus.FAILED,
+                            error_message=f"{error_msg} (max retries exceeded)",
+                        )
+
+                        with self._stats_lock:
+                            self._worker_stats["errors"] += 1
+                            self._worker_stats["last_error"] = error_msg
+
+                        self.logger.error(
+                            "Network error for %s after %s retries: %s",
+                            username,
+                            self.MAX_RETRIES,
+                            str(e),
+                        )
+                        time.sleep(5)
 
                 except Exception as e:
                     # Unexpected error - log and continue

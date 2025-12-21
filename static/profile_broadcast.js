@@ -71,11 +71,9 @@
 
       const messages = json.data || [];
       const container = document.getElementById("messages-list");
-      const select = document.getElementById("message-select");
 
       if (messages.length === 0) {
         container.innerHTML = '<p class="text-muted">No message templates created yet.</p>';
-        select.innerHTML = '<option value="">Select message template</option>';
         return;
       }
 
@@ -103,14 +101,6 @@
       `
         )
         .join("");
-
-      // Update select dropdown
-      select.innerHTML =
-        '<option value="">Select message template</option>' +
-        messages
-          .filter((m) => m.is_active)
-          .map((m) => `<option value="${m.message_id}">${escapeHtml(m.title)}</option>`)
-          .join("");
     } catch (e) {
       setStatus("Failed to load messages: " + e.message, "error");
     }
@@ -483,8 +473,8 @@
       return;
     }
 
-    if (maxWatchers < 1 || maxWatchers > 500) {
-      setStatus("Max watchers must be between 1 and 500", "error");
+    if (maxWatchers < 1) {
+      setStatus("Max watchers must be at least 1", "error");
       return;
     }
 
@@ -530,26 +520,19 @@
   };
 
   window.startWorker = async function () {
-    const messageId = document.getElementById("message-select").value;
-
-    if (!messageId) {
-      setStatus("Please select a message template", "error");
-      return;
-    }
-
     setStatus("Starting broadcast worker...");
 
     try {
       const resp = await fetch("/api/profile-messages/worker/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message_id: parseInt(messageId, 10) }),
+        body: JSON.stringify({}),
       });
       const json = await resp.json();
 
       if (!json.success) throw new Error(json.message || json.error);
 
-      setStatus("Broadcast worker started", "success");
+      setStatus("Broadcast worker started - will use random active templates", "success");
       await fetchStatus();
 
       // Start polling

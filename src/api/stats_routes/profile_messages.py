@@ -145,14 +145,11 @@ def register_profile_message_routes(
 
     @app.route("/api/profile-messages/worker/start", methods=["POST"])
     def start_broadcast_worker():
-        """Start worker to broadcast message to watchers queue."""
+        """Start worker to broadcast message to watchers queue.
+        
+        Worker will randomly select from active message templates for each send.
+        """
         try:
-            data = request.get_json() or {}
-            message_id = data.get("message_id")
-
-            if not message_id:
-                return jsonify({"success": False, "error": "message_id is required"}), 400
-
             auth_service, _stats_service = get_services()
 
             if not auth_service.ensure_authenticated():
@@ -166,7 +163,7 @@ def register_profile_message_routes(
                 )
 
             service = get_profile_message_service()
-            result = service.start_worker(access_token, message_id)
+            result = service.start_worker(access_token)
 
             return jsonify(result)
         except Exception as e:  # noqa: BLE001

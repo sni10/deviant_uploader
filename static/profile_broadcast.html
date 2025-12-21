@@ -102,11 +102,11 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label for="username-input" class="form-label">Username</label>
-                        <input type="text" id="username-input" class="form-control" placeholder="Enter DA username">
+                        <input type="text" id="username-input" class="form-control" placeholder="Enter DA username" value="aiviso">
                     </div>
                     <div class="col-md-6">
                         <label for="max-watchers-input" class="form-label">Max Watchers</label>
-                        <input type="number" id="max-watchers-input" class="form-control" value="50" min="1" max="500">
+                        <input type="number" id="max-watchers-input" class="form-control" value="50" min="1">
                     </div>
                     <div class="col-12">
                         <button class="btn btn-primary" onclick="fetchWatchers()">Fetch Watchers</button>
@@ -188,10 +188,12 @@
                 <h5 class="mb-0">Broadcast Worker</h5>
             </div>
             <div class="card-body">
+                <div class="alert alert-info mb-3" role="alert">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>Randomized Templates:</strong> Worker will randomly select from active message templates for each send.
+                    To activate/deactivate templates, click "Edit" button and use "Active" checkbox in the edit dialog.
+                </div>
                 <div class="d-flex gap-2 mb-3">
-                    <select id="message-select" class="form-select" style="max-width: 300px;">
-                        <option value="">Select message template</option>
-                    </select>
                     <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Broadcasting</button>
                     <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Broadcasting</button>
                 </div>

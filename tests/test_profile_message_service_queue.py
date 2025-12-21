@@ -157,11 +157,12 @@ class TestProfileMessageServiceQueue:
         # One selected watcher in queue
         service._watchers_queue = [{"username": "u", "userid": "1", "selected": True}]
 
-        # Active message template
+        # Active message templates
         message = MagicMock()
+        message.message_id = 1
         message.is_active = True
         message.body = "Hello"
-        service.message_repo.get_message_by_id.return_value = message
+        service.message_repo.get_active_messages.return_value = [message]
 
         # Successful HTTP response
         resp = MagicMock()
@@ -169,7 +170,7 @@ class TestProfileMessageServiceQueue:
         resp.json.return_value = {"commentid": "cid"}
         post_mock.return_value = resp
 
-        result = service.start_worker(access_token="token", message_id=1)
+        result = service.start_worker(access_token="token")
         assert result["success"] is True
 
         assert service._worker_thread is not None

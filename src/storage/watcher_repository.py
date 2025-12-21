@@ -1,6 +1,6 @@
 """Repository for watchers using SQLAlchemy Core."""
 
-from sqlalchemy import select, insert, func
+from sqlalchemy import select, insert, delete, func
 from .base_repository import BaseRepository
 from .profile_message_tables import watchers
 from ..domain.models import Watcher
@@ -103,3 +103,31 @@ class WatcherRepository(BaseRepository):
 
         row = result.fetchone()
         return row[0] if row else 0
+
+    def delete_watchers_not_in_list(self, usernames: list[str]) -> int:
+        """Delete watchers whose usernames are not in the provided list.
+
+        This is used for synchronization: after fetching current watchers
+        from DeviantArt API, we remove those who unfollowed.
+
+        Args:
+            usernames: List of current watcher usernames to keep
+
+        Returns:
+            Number of watchers deleted
+        """
+        if not usernames:
+            # If list is empty, delete all watchers
+            stmt = delete(watchers)
+        else:
+            # Delete watchers not in the list
+            stmt = delete(watchers).where(watchers.c.username.notin_(usernames))
+
+        result = self._execute_core(stmt)
+        self.conn.commit()
+
+        # Get rowcount
+        if hasattr(result, "rowcount"):
+            return result.rowcount or 0
+
+        return 0
