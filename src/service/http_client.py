@@ -23,7 +23,9 @@ class DeviantArtHttpClient:
     MAX_BACKOFF_DELAY = 60  # Maximum backoff delay in seconds
 
     # HTTP status codes that should trigger retry
-    RETRYABLE_STATUS_CODES = {400, 429, 503}
+    # NOTE: Do not retry generic 4xx: those are usually permanent request errors.
+    # Rate limiting and temporary outages are handled separately.
+    RETRYABLE_STATUS_CODES = {429, 503}
 
     # Default delay between requests to avoid rate limiting
     DEFAULT_REQUEST_DELAY = 5  # seconds
@@ -259,6 +261,44 @@ class DeviantArtHttpClient:
 
                 self.logger.debug("HTTP %s %s: success", method, url)
                 return response
+
+            except requests.HTTPError as e:
+                # HTTP-level errors should only be retried when they are
+                # explicitly retryable (e.g., 429/503). Generic 4xx must not be
+                # treated as network errors.
+                last_exception = e
+
+                response = getattr(e, "response", None)
+                if response is not None:
+                    is_rate_limited = self._is_rate_limited_response(response)
+                    is_retryable = (
+                        response.status_code in self.RETRYABLE_STATUS_CODES
+                        or is_rate_limited
+                    )
+                    if not is_retryable:
+                        raise
+
+                if not self.enable_retry or retry_count >= self.MAX_RETRIES:
+                    self.logger.error(
+                        "HTTP %s failed: %s (max retries exceeded)",
+                        method,
+                        str(e),
+                        exc_info=True,
+                    )
+                    raise
+
+                retry_count += 1
+                delay = self._calculate_backoff_delay(retry_count)
+                self.logger.warning(
+                    "HTTP %s error: %s (attempt %d/%d), retrying in %d seconds",
+                    method,
+                    str(e),
+                    retry_count,
+                    self.MAX_RETRIES,
+                    delay,
+                )
+                self._sleep(delay, reason="retry after HTTP error")
+                continue
 
             except requests.RequestException as e:
                 last_exception = e

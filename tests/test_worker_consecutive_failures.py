@@ -293,3 +293,63 @@ class TestMassFaveServiceConsecutiveFailures:
         status = service.get_worker_status()
         assert "consecutive_failures" in status
         assert status["consecutive_failures"] >= 1
+
+    @patch("src.service.mass_fave_service.random.uniform", return_value=0)
+    def test_http_400_invalid_deviation_is_deleted_and_not_counted_as_consecutive_failure(
+        self, _uniform_mock: MagicMock
+    ) -> None:
+        """HTTP 400 invalid_request (error_code=7) should delete deviation and continue."""
+
+        service = self._create_service()
+
+        # Make the worker exit once queue is drained
+        call_count = 0
+
+        def get_one_pending():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"deviationid": "dev1"}
+            if call_count == 2:
+                return {"deviationid": "dev2"}
+
+            service._stop_flag.set()
+            return None
+
+        service.repo.get_one_pending.side_effect = get_one_pending
+
+        # 1st call: HTTP 400 invalid_request (non-favouritable deviation)
+        response_400 = MagicMock()
+        response_400.status_code = 400
+        response_400.text = (
+            '{"error":"invalid_request","error_description":"Deviation can not be '
+            'favourited.","error_code":7}'
+        )
+        response_400.json.return_value = {
+            "error": "invalid_request",
+            "error_description": "Deviation can not be favourited.",
+            "error_code": 7,
+        }
+        http_error = requests.HTTPError("400 Client Error", response=response_400)
+
+        success_resp = MagicMock()
+        success_resp.json.return_value = {"success": True}
+
+        service.http_client.post.side_effect = [http_error, success_resp]
+
+        result = service.start_worker(access_token="token")
+        assert result["success"] is True
+
+        assert service._worker_thread is not None
+        service._worker_thread.join(timeout=5)
+
+        # invalid deviation removed from queue storage
+        service.repo.delete_deviation.assert_called_once_with("dev1")
+        service.repo.mark_failed.assert_not_called()
+
+        # next deviation still processed
+        service.repo.mark_faved.assert_called_once_with("dev2")
+
+        status = service.get_worker_status()
+        assert status["processed"] == 1
+        assert status["consecutive_failures"] == 0

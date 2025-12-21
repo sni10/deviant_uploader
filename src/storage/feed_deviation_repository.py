@@ -263,6 +263,26 @@ class FeedDeviationRepository(BaseRepository):
             return result.rowcount
         return 0
 
+    def delete_deviation(self, deviationid: str) -> int:
+        """Delete a deviation from the queue.
+
+        This is used for permanent, non-retryable API errors (e.g., invalid
+        deviation that can never be favourited).
+
+        Args:
+            deviationid: DeviantArt deviation UUID.
+
+        Returns:
+            Number of deleted rows.
+        """
+        stmt = delete(feed_deviations).where(feed_deviations.c.deviationid == deviationid)
+        result = self._execute_core(stmt)
+        self.conn.commit()
+
+        if hasattr(result, "rowcount"):
+            return result.rowcount
+        return 0
+
     def reset_failed_to_pending(self) -> int:
         """Reset all failed deviations back to pending status.
 

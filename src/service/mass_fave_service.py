@@ -261,6 +261,56 @@ class MassFaveService:
                         self.logger.info("Worker stop requested during delay")
                         break
 
+                except requests.HTTPError as e:
+                    response = getattr(e, "response", None)
+                    status_code = getattr(response, "status_code", None)
+
+                    # Non-retryable request errors: delete from queue to avoid
+                    # poisoning the worker with permanent failures.
+                    if (
+                        response is not None
+                        and isinstance(status_code, int)
+                        and 400 <= status_code < 500
+                        and status_code != 429
+                    ):
+                        error_payload: object | None
+                        try:
+                            error_payload = response.json()
+                        except Exception:  # noqa: BLE001
+                            error_payload = None
+
+                        error_desc = None
+                        error_code = None
+                        error_name = None
+                        if isinstance(error_payload, dict):
+                            error_desc = error_payload.get("error_description")
+                            error_code = error_payload.get("error_code")
+                            error_name = error_payload.get("error")
+
+                        error_parts = [f"HTTP {status_code}"]
+                        if error_name:
+                            error_parts.append(str(error_name))
+                        if error_code is not None:
+                            error_parts.append(f"code={error_code}")
+                        if error_desc:
+                            error_parts.append(str(error_desc))
+                        error_msg = ": ".join([error_parts[0], " ".join(error_parts[1:])])
+
+                        self.repo.delete_deviation(deviationid)
+                        with self._stats_lock:
+                            self._worker_stats["errors"] += 1
+                            self._worker_stats["last_error"] = error_msg
+                            self._worker_stats["consecutive_failures"] = 0
+
+                        self.logger.warning(
+                            "Skipping and deleting deviation %s: %s",
+                            deviationid,
+                            error_msg,
+                        )
+                        continue
+
+                    raise
+
                 except requests.RequestException as e:
                     # HTTP client already retried - this is final failure
                     error_msg = f"Request failed after retries: {str(e)}"
