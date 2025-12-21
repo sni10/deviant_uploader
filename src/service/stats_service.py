@@ -1,6 +1,7 @@
 """Service for fetching and persisting deviation statistics."""
 from datetime import date
 import re
+import threading
 import time
 from logging import Logger
 from typing import Optional
@@ -8,6 +9,7 @@ import requests
 
 from ..storage.deviation_repository import DeviationRepository
 from ..storage.deviation_stats_repository import DeviationStatsRepository
+from ..storage.gallery_repository import GalleryRepository
 from ..storage.stats_snapshot_repository import StatsSnapshotRepository
 from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
 from ..storage.deviation_metadata_repository import DeviationMetadataRepository
@@ -28,14 +30,29 @@ class StatsService:
         deviation_repository: DeviationRepository,
         logger: Logger,
         http_client: Optional[DeviantArtHttpClient] = None,
+        gallery_repository: Optional[GalleryRepository] = None,
     ) -> None:
         self.deviation_stats_repo = deviation_stats_repository
         self.stats_snapshot_repo = stats_snapshot_repository
         self.user_stats_snapshot_repo = user_stats_snapshot_repository
         self.deviation_metadata_repo = deviation_metadata_repository
         self.deviation_repository = deviation_repository
+        self.gallery_repo = gallery_repository
         self.logger = logger
         self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+
+        # Worker state
+        self._worker_thread: Optional[threading.Thread] = None
+        self._worker_running = False
+        self._stop_flag = threading.Event()
+        self._stats_lock = threading.Lock()
+        self._worker_stats = {
+            "processed_galleries": 0,
+            "processed_deviations": 0,
+            "errors": 0,
+            "last_error": None,
+            "current_gallery": None,
+        }
 
     @staticmethod
     def _slugify_title(title: str) -> str:
@@ -116,8 +133,11 @@ class StatsService:
                 break
             offset = next_offset
             
-            # Rate limiting: wait 3 seconds before next pagination request
-            time.sleep(3)
+            # Rate limiting: use recommended delay from HTTP client
+            # (respects Retry-After header or uses exponential backoff)
+            delay = self.http_client.get_recommended_delay()
+            self.logger.debug("Waiting %d seconds before next pagination request", delay)
+            time.sleep(delay)
 
         self.logger.info(
             "Loaded %d deviations from gallery folder %s", len(all_items), folderid
@@ -133,11 +153,18 @@ class StatsService:
 
         # DeviantArt limits ext_stats batches to 10 items
         batch_size = 10
+        total_batches = (len(deviationids) + batch_size - 1) // batch_size
 
-        self.logger.info("Fetching metadata for %d deviations", len(deviationids))
+        self.logger.info(
+            "Fetching metadata for %d deviations in %d batches (batch_size=%d)",
+            len(deviationids),
+            total_batches,
+            batch_size,
+        )
 
         for i in range(0, len(deviationids), batch_size):
             batch = deviationids[i : i + batch_size]
+            batch_num = (i // batch_size) + 1
             params: dict[str, str | list[str]] = {
                 "access_token": access_token,
                 "ext_stats": "true",
@@ -149,22 +176,40 @@ class StatsService:
                 "deviationids[]": batch,
             }
 
-            self.logger.debug(
-                "Fetching metadata batch %d-%d (size=%d)",
-                i,
-                i + len(batch) - 1,
-                len(batch),
+            self.logger.info(
+                "Fetching metadata batch %d/%d (deviations %d-%d of %d)",
+                batch_num,
+                total_batches,
+                i + 1,
+                i + len(batch),
+                len(deviationids),
             )
 
             # HTTP client handles retry automatically
             response = self.http_client.get(url, params=params)
             payload = response.json()
+            fetched_count = len(payload.get("metadata", []))
             all_meta.extend(payload.get("metadata", []))
+
+            self.logger.info(
+                "Batch %d/%d completed: fetched %d metadata records",
+                batch_num,
+                total_batches,
+                fetched_count,
+            )
             
-            # Rate limiting: wait 3 seconds before next batch request
+            # Rate limiting: use recommended delay from HTTP client
+            # (respects Retry-After header or uses exponential backoff)
             # (skip sleep after the last batch)
             if i + batch_size < len(deviationids):
-                time.sleep(3)
+                delay = self.http_client.get_recommended_delay()
+                self.logger.debug("Waiting %d seconds before next batch request", delay)
+                time.sleep(delay)
+
+        self.logger.info(
+            "Metadata fetch completed: %d total records fetched",
+            len(all_meta),
+        )
 
         return all_meta
 
@@ -205,10 +250,13 @@ class StatsService:
                 )
                 details[deviationid] = payload
             
-            # Rate limiting: wait 3 seconds before next deviation request
+            # Rate limiting: use recommended delay from HTTP client
+            # (respects Retry-After header or uses exponential backoff)
             # (skip sleep after the last deviation)
             if idx < len(deviationids) - 1:
-                time.sleep(3)
+                delay = self.http_client.get_recommended_delay()
+                self.logger.debug("Waiting %d seconds before next deviation request", delay)
+                time.sleep(delay)
 
         return details
 
@@ -674,3 +722,158 @@ class StatsService:
                 "friends": friends_data,
             },
         }
+
+    # ========== Worker Methods ==========
+
+    def start_worker(self, access_token: str, username: Optional[str] = None) -> dict:
+        """Start background worker thread for stats sync.
+
+        Args:
+            access_token: OAuth access token for API calls
+            username: Optional DeviantArt username for gallery sync
+
+        Returns:
+            Status dictionary: {success, message}
+        """
+        if self._worker_running:
+            return {"success": False, "message": "Worker already running"}
+
+        if not self.gallery_repo:
+            return {"success": False, "message": "Gallery repository not configured"}
+
+        self._stop_flag.clear()
+        with self._stats_lock:
+            self._worker_stats = {
+                "processed_galleries": 0,
+                "processed_deviations": 0,
+                "errors": 0,
+                "last_error": None,
+                "current_gallery": None,
+            }
+
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            args=(access_token, username),
+            daemon=True,
+        )
+        self._worker_running = True
+        self._worker_thread.start()
+
+        self.logger.info("Stats sync worker thread started")
+        return {"success": True, "message": "Worker started"}
+
+    def stop_worker(self) -> dict:
+        """Stop background worker thread.
+
+        Returns:
+            Status dictionary: {success, message}
+        """
+        if not self._worker_running:
+            return {"success": False, "message": "Worker not running"}
+
+        self.logger.info("Stopping stats sync worker...")
+        self._stop_flag.set()
+        if self._worker_thread:
+            self._worker_thread.join(timeout=10)
+
+        self._worker_running = False
+        self.logger.info("Stats sync worker thread stopped")
+        return {"success": True, "message": "Worker stopped"}
+
+    def get_worker_status(self) -> dict:
+        """Get worker status and statistics.
+
+        Returns:
+            Dictionary with: {running, processed_galleries, processed_deviations,
+                            errors, last_error, current_gallery}
+        """
+        with self._stats_lock:
+            return {
+                "running": self._worker_running,
+                "processed_galleries": self._worker_stats["processed_galleries"],
+                "processed_deviations": self._worker_stats["processed_deviations"],
+                "errors": self._worker_stats["errors"],
+                "last_error": self._worker_stats["last_error"],
+                "current_gallery": self._worker_stats["current_gallery"],
+            }
+
+    def _worker_loop(self, access_token: str, username: Optional[str]) -> None:
+        """Background worker loop for syncing all enabled galleries."""
+        self.logger.info("Stats sync worker loop started")
+        try:
+            # Get all galleries with sync_enabled=True
+            galleries = self.gallery_repo.get_sync_enabled_galleries()
+            total_galleries = len(galleries)
+
+            self.logger.info(
+                "Found %d galleries with sync enabled",
+                total_galleries,
+            )
+
+            for idx, gallery in enumerate(galleries):
+                # Check stop flag before each gallery
+                if self._stop_flag.is_set():
+                    self.logger.info("Worker stop requested, exiting loop")
+                    break
+
+                folderid = gallery.folderid
+                gallery_name = gallery.name or folderid
+
+                with self._stats_lock:
+                    self._worker_stats["current_gallery"] = gallery_name
+
+                self.logger.info(
+                    "Syncing gallery %d/%d: %s (%s)",
+                    idx + 1,
+                    total_galleries,
+                    gallery_name,
+                    folderid,
+                )
+
+                try:
+                    result = self.sync_gallery(access_token, folderid, username=username)
+                    synced_count = result.get("synced", 0)
+
+                    with self._stats_lock:
+                        self._worker_stats["processed_galleries"] += 1
+                        self._worker_stats["processed_deviations"] += synced_count
+
+                    self.logger.info(
+                        "Gallery %s synced: %d deviations",
+                        gallery_name,
+                        synced_count,
+                    )
+
+                except requests.RequestException as e:
+                    error_msg = f"Failed to sync gallery {gallery_name}: {str(e)}"
+                    with self._stats_lock:
+                        self._worker_stats["errors"] += 1
+                        self._worker_stats["last_error"] = error_msg
+                    self.logger.error(error_msg)
+
+                except Exception as e:
+                    error_msg = f"Unexpected error syncing gallery {gallery_name}: {str(e)}"
+                    with self._stats_lock:
+                        self._worker_stats["errors"] += 1
+                        self._worker_stats["last_error"] = error_msg
+                    self.logger.exception(error_msg)
+
+                # Wait between galleries with stop_flag check (interruptible)
+                if idx < total_galleries - 1:
+                    if self._stop_flag.wait(timeout=3):
+                        self.logger.info("Worker stop requested during delay")
+                        break
+
+            with self._stats_lock:
+                self._worker_stats["current_gallery"] = None
+
+            self.logger.info(
+                "Stats sync worker completed: %d galleries, %d deviations, %d errors",
+                self._worker_stats["processed_galleries"],
+                self._worker_stats["processed_deviations"],
+                self._worker_stats["errors"],
+            )
+
+        finally:
+            self._worker_running = False
+            self.logger.info("Stats sync worker loop stopped")

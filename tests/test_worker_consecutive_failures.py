@@ -176,13 +176,15 @@ class TestMassFaveServiceConsecutiveFailures:
             http_client=http_client,
         )
 
-    @patch("src.service.mass_fave_service.time.sleep", return_value=None)
     @patch("src.service.mass_fave_service.random.uniform", return_value=0)
     def test_worker_stops_after_max_consecutive_failures(
-        self, _uniform_mock: MagicMock, _sleep_mock: MagicMock
+        self, _uniform_mock: MagicMock
     ) -> None:
         """Worker should stop after MAX_CONSECUTIVE_FAILURES consecutive errors."""
         service = self._create_service()
+
+        # Mock _stop_flag.wait to return immediately (simulating no stop request)
+        service._stop_flag.wait = MagicMock(return_value=False)
 
         # Mock repo to return deviations
         call_count = 0
@@ -214,13 +216,15 @@ class TestMassFaveServiceConsecutiveFailures:
         assert status["consecutive_failures"] == 5
         assert status["processed"] == 0
 
-    @patch("src.service.mass_fave_service.time.sleep", return_value=None)
     @patch("src.service.mass_fave_service.random.uniform", return_value=0)
     def test_consecutive_failures_resets_on_success(
-        self, _uniform_mock: MagicMock, _sleep_mock: MagicMock
+        self, _uniform_mock: MagicMock
     ) -> None:
         """consecutive_failures should reset to 0 after successful fave."""
         service = self._create_service()
+
+        # Mock _stop_flag.wait to return immediately (simulating no stop request)
+        service._stop_flag.wait = MagicMock(return_value=False)
 
         # Mock repo to return deviations
         call_count = 0
@@ -234,7 +238,7 @@ class TestMassFaveServiceConsecutiveFailures:
 
         service.repo.get_one_pending.side_effect = get_one_pending
 
-        # Mock http_client: fail 3 times, succeed once, fail 3 more times
+        # Mock http_client: fail 3 times, succeed once, fail 5 more times
         post_call_count = 0
 
         def side_effect(*args, **kwargs):

@@ -12,6 +12,7 @@ def register_stats_routes(
     *,
     get_services: Callable[[], tuple[object, object]],
     get_repositories: Callable[[], tuple[object, ...]],
+    get_stats_sync_service: Callable[[], object] | None = None,
 ) -> None:
     """Register statistics, sync, and options endpoints."""
 
@@ -157,4 +158,62 @@ def register_stats_routes(
             return jsonify({"success": True, "data": snapshot})
         except Exception as exc:  # noqa: BLE001
             g.logger.error("Failed to fetch latest user stats", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    # ========== Worker Endpoints ==========
+
+    @app.route("/api/stats/worker/start", methods=["POST"])
+    def start_stats_worker():
+        """Start the background stats sync worker."""
+        if not get_stats_sync_service:
+            return jsonify({"success": False, "error": "Worker not configured"}), 500
+
+        try:
+            payload = request.get_json(silent=True) or {}
+            username = payload.get("username")
+
+            auth_service, _stats_service = get_services()
+
+            if not auth_service.ensure_authenticated():
+                return jsonify({"success": False, "error": "Not authenticated"}), 401
+
+            access_token = auth_service.get_valid_token()
+            if not access_token:
+                return jsonify(
+                    {"success": False, "error": "Failed to obtain access token"}
+                ), 401
+
+            stats_sync_service = get_stats_sync_service()
+            result = stats_sync_service.start_worker(access_token, username=username)
+            return jsonify(result)
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to start stats worker", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/stats/worker/stop", methods=["POST"])
+    def stop_stats_worker():
+        """Stop the background stats sync worker."""
+        if not get_stats_sync_service:
+            return jsonify({"success": False, "error": "Worker not configured"}), 500
+
+        try:
+            stats_sync_service = get_stats_sync_service()
+            result = stats_sync_service.stop_worker()
+            return jsonify(result)
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to stop stats worker", exc_info=exc)
+            return jsonify({"success": False, "error": str(exc)}), 500
+
+    @app.route("/api/stats/worker/status", methods=["GET"])
+    def get_stats_worker_status():
+        """Get the status of the background stats sync worker."""
+        if not get_stats_sync_service:
+            return jsonify({"success": False, "error": "Worker not configured"}), 500
+
+        try:
+            stats_sync_service = get_stats_sync_service()
+            status = stats_sync_service.get_worker_status()
+            return jsonify({"success": True, "data": status})
+        except Exception as exc:  # noqa: BLE001
+            g.logger.error("Failed to get stats worker status", exc_info=exc)
             return jsonify({"success": False, "error": str(exc)}), 500

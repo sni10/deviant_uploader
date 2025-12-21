@@ -202,6 +202,43 @@ def get_mass_fave_service() -> MassFaveService:
     return current_app.config["MASS_FAVE_SERVICE"]
 
 
+def get_stats_sync_service() -> StatsService:
+    """Get or create stats sync service as application-level singleton.
+
+    The StatsService worker runs a background thread that must persist
+    beyond individual HTTP requests. Therefore, it uses its own dedicated
+    database connections that are NOT closed by teardown_db().
+
+    Returns:
+        StatsService instance (singleton per application)
+    """
+    from flask import current_app
+
+    if "STATS_SYNC_SERVICE" not in current_app.config:
+        # Create dedicated connections for the worker (not tied to request lifecycle)
+        worker_connection = get_connection()
+        deviation_stats_repo = DeviationStatsRepository(worker_connection)
+        stats_snapshot_repo = StatsSnapshotRepository(worker_connection)
+        user_stats_snapshot_repo = UserStatsSnapshotRepository(worker_connection)
+        deviation_metadata_repo = DeviationMetadataRepository(worker_connection)
+        deviation_repo = DeviationRepository(worker_connection)
+        gallery_repo = GalleryRepository(worker_connection)
+        logger = current_app.config["APP_LOGGER"]
+
+        stats_service = StatsService(
+            deviation_stats_repo,
+            stats_snapshot_repo,
+            user_stats_snapshot_repo,
+            deviation_metadata_repo,
+            deviation_repo,
+            logger,
+            gallery_repository=gallery_repo,
+        )
+        current_app.config["STATS_SYNC_SERVICE"] = stats_service
+
+    return current_app.config["STATS_SYNC_SERVICE"]
+
+
 def get_profile_message_service() -> ProfileMessageService:
     """Get or create profile message service as application-level singleton.
 
@@ -277,7 +314,12 @@ def create_app(config: Config | None = None) -> Flask:
                 g.logger.warning("Request ended with exception: %s", exception)
 
     register_pages_routes(app, static_dir=STATIC_DIR)
-    register_stats_routes(app, get_services=get_services, get_repositories=get_repositories)
+    register_stats_routes(
+        app,
+        get_services=get_services,
+        get_repositories=get_repositories,
+        get_stats_sync_service=get_stats_sync_service,
+    )
     register_charts_routes(app, get_services=get_services)
     register_upload_admin_routes(
         app,

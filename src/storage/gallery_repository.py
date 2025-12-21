@@ -138,6 +138,24 @@ class GalleryRepository(BaseRepository):
         )
         
         return [self._row_to_gallery(row) for row in cursor.fetchall()]
+
+    def get_sync_enabled_galleries(self) -> list[Gallery]:
+        """
+        Get all galleries with sync_enabled=True.
+        
+        Returns:
+            List of Gallery objects with sync enabled
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT id, folderid, name, parent, size, sync_enabled, created_at, updated_at
+            FROM galleries
+            WHERE sync_enabled = 1
+            ORDER BY name
+            """
+        )
+        
+        return [self._row_to_gallery(row) for row in cursor.fetchall()]
     
     def update_sync_enabled(self, folderid: str, sync_enabled: bool) -> bool:
         """

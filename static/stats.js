@@ -431,9 +431,126 @@
     }
   }
 
+  // ========== Worker Functions ==========
+
+  let workerPollInterval = null;
+
+  async function startWorker() {
+    const username = document.getElementById("user-select").value;
+    setStatus("Starting worker...");
+
+    try {
+      const resp = await fetch("/api/stats/worker/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username || undefined }),
+      });
+      const json = await resp.json();
+
+      if (json.success) {
+        setStatus("Worker started", "success");
+        startWorkerPolling();
+      } else {
+        setStatus("Failed to start worker: " + (json.message || json.error), "error");
+      }
+    } catch (e) {
+      setStatus("Error starting worker: " + e.message, "error");
+    }
+  }
+
+  async function stopWorker() {
+    setStatus("Stopping worker...");
+
+    try {
+      const resp = await fetch("/api/stats/worker/stop", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (json.success) {
+        setStatus("Worker stopped", "success");
+        stopWorkerPolling();
+        updateWorkerUI(false);
+      } else {
+        setStatus("Failed to stop worker: " + (json.message || json.error), "error");
+      }
+    } catch (e) {
+      setStatus("Error stopping worker: " + e.message, "error");
+    }
+  }
+
+  async function fetchWorkerStatus() {
+    try {
+      const resp = await fetch("/api/stats/worker/status");
+      const json = await resp.json();
+
+      if (json.success && json.data) {
+        const data = json.data;
+        updateWorkerUI(data.running, data);
+
+        if (!data.running && workerPollInterval) {
+          // Worker finished, stop polling and refresh stats
+          stopWorkerPolling();
+          await loadStats();
+          setStatus("Worker completed", "success");
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch worker status", e);
+    }
+  }
+
+  function updateWorkerUI(running, data = null) {
+    const startBtn = document.getElementById("btn-start-worker");
+    const stopBtn = document.getElementById("btn-stop-worker");
+    const statusDiv = document.getElementById("worker-status");
+    const statusText = document.getElementById("worker-status-text");
+
+    if (running) {
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      statusDiv.style.display = "block";
+
+      if (data) {
+        let statusMsg = `Worker running: ${data.processed_galleries} galleries, ${data.processed_deviations} deviations`;
+        if (data.current_gallery) {
+          statusMsg += ` | Current: ${data.current_gallery}`;
+        }
+        if (data.errors > 0) {
+          statusMsg += ` | Errors: ${data.errors}`;
+        }
+        statusText.textContent = statusMsg;
+      }
+    } else {
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusDiv.style.display = "none";
+      statusText.textContent = "";
+    }
+  }
+
+  function startWorkerPolling() {
+    if (workerPollInterval) {
+      clearInterval(workerPollInterval);
+    }
+    // Poll every 2 seconds
+    workerPollInterval = setInterval(fetchWorkerStatus, 2000);
+    // Fetch immediately
+    fetchWorkerStatus();
+  }
+
+  function stopWorkerPolling() {
+    if (workerPollInterval) {
+      clearInterval(workerPollInterval);
+      workerPollInterval = null;
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
     await loadOptions();
     await loadStats();
+    // Check initial worker status
+    await fetchWorkerStatus();
   });
 
   // Expose for inline handlers
@@ -444,4 +561,6 @@
   window.toggleGallerySync = toggleGallerySync;
   window.selectAllGalleries = selectAllGalleries;
   window.deselectAllGalleries = deselectAllGalleries;
+  window.startWorker = startWorker;
+  window.stopWorker = stopWorker;
 })();

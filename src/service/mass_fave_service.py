@@ -225,8 +225,11 @@ class MassFaveService:
                 deviation = self.repo.get_one_pending()
 
                 if not deviation:
-                    # Queue empty, sleep and continue
-                    time.sleep(2)
+                    # Queue empty, wait with stop_flag check (interruptible sleep)
+                    if self._stop_flag.wait(timeout=2):
+                        # Stop flag was set during wait
+                        self.logger.info("Worker stop requested during idle wait")
+                        break
                     continue
 
                 deviationid = deviation["deviationid"]
@@ -246,8 +249,12 @@ class MassFaveService:
                         self._worker_stats["consecutive_failures"] = 0  # Reset on success
                     self.logger.info("Faved: %s", deviationid)
 
-                    # Random delay to avoid rate limiting
-                    time.sleep(random.uniform(2, 10))
+                    # Random delay with stop_flag check (interruptible sleep)
+                    delay = random.uniform(2, 10)
+                    if self._stop_flag.wait(timeout=delay):
+                        # Stop flag was set during wait
+                        self.logger.info("Worker stop requested during delay")
+                        break
 
                 except requests.RequestException as e:
                     # HTTP client already retried - this is final failure
@@ -276,7 +283,10 @@ class MassFaveService:
                         )
                         break
 
-                    time.sleep(2)
+                    # Wait with stop_flag check (interruptible sleep)
+                    if self._stop_flag.wait(timeout=2):
+                        self.logger.info("Worker stop requested during error delay")
+                        break
 
                 except Exception as e:
                     # Unexpected error - mark failed and continue
@@ -286,7 +296,10 @@ class MassFaveService:
                         self._worker_stats["errors"] += 1
                         self._worker_stats["last_error"] = error_msg
                     self.logger.exception("Unexpected error for %s", deviationid)
-                    time.sleep(2)
+                    # Wait with stop_flag check (interruptible sleep)
+                    if self._stop_flag.wait(timeout=2):
+                        self.logger.info("Worker stop requested after unexpected error")
+                        break
         finally:
             self._worker_running = False
             self.logger.info("Worker loop stopped")

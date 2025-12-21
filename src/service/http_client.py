@@ -25,6 +25,9 @@ class DeviantArtHttpClient:
     # HTTP status codes that should trigger retry
     RETRYABLE_STATUS_CODES = {400, 429, 503}
 
+    # Default delay between requests to avoid rate limiting
+    DEFAULT_REQUEST_DELAY = 5  # seconds
+
     def __init__(self, logger: Logger, enable_retry: bool = True) -> None:
         """Initialize HTTP client.
         
@@ -34,6 +37,25 @@ class DeviantArtHttpClient:
         """
         self.logger = logger
         self.enable_retry = enable_retry
+        # Track last retry delay from rate limiting for proactive waiting
+        self._last_retry_delay: int = 0
+
+    def get_recommended_delay(self) -> int:
+        """Get recommended delay between requests based on recent rate limiting.
+        
+        If a rate limit was recently encountered, returns the last retry delay
+        used. Otherwise returns the default request delay.
+        
+        Returns:
+            Recommended delay in seconds before next request
+        """
+        if self._last_retry_delay > 0:
+            return self._last_retry_delay
+        return self.DEFAULT_REQUEST_DELAY
+
+    def reset_retry_delay(self) -> None:
+        """Reset the last retry delay after successful requests without rate limiting."""
+        self._last_retry_delay = 0
 
     @staticmethod
     def _is_rate_limited_response(response: requests.Response) -> bool:
@@ -82,6 +104,12 @@ class DeviantArtHttpClient:
         Raises:
             requests.RequestException: After max retries exceeded or non-retryable error
         """
+
+        self.logger.debug(
+            "Fetche item %s",
+            url,
+        )
+
         return self._request_with_retry(
             method="GET",
             url=url,
@@ -177,12 +205,23 @@ class DeviantArtHttpClient:
                             response.status_code,
                             response.text[:200],
                         )
+                        # For JSON-based rate limits (HTTP 200 with error in body),
+                        # raise_for_status() won't raise, so we must raise manually
+                        if is_rate_limited and response.status_code < 400:
+                            raise requests.RequestException(
+                                f"Rate limited after {self.MAX_RETRIES} retries: "
+                                f"{response.text[:200]}"
+                            )
                         response.raise_for_status()
                         return response
 
                     # Handle retry
                     retry_count += 1
                     delay = self._calculate_retry_delay(response, retry_count)
+                    
+                    # Store last retry delay for proactive rate limiting
+                    if is_rate_limited:
+                        self._last_retry_delay = delay
 
                     error_type = "rate limited" if is_rate_limited else f"HTTP {response.status_code}"
                     self.logger.warning(
