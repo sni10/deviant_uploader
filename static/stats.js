@@ -64,90 +64,6 @@
     }
   }
 
-  async function syncStats() {
-    const username = document.getElementById("user-select").value;
-    const galleries = (optionsCache.galleries || []).filter(g => g.sync_enabled);
-
-    if (galleries.length === 0) {
-      setStatus("No galleries selected to sync", "error");
-      return;
-    }
-
-    setStatus(`Syncing ${galleries.length} selected galleries...`);
-
-    let syncedCount = 0;
-    let errorCount = 0;
-    let lastUserStats = null;
-
-    try {
-      for (let i = 0; i < galleries.length; i++) {
-        const gallery = galleries[i];
-        const folderid = gallery.folderid;
-
-        setStatus(`Syncing gallery ${i + 1}/${galleries.length}: ${gallery.name}...`);
-
-        try {
-          const resp = await fetch("/api/stats/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              folderid,
-              username: username || undefined,
-            }),
-          });
-          const json = await resp.json();
-
-          if (!json.success) {
-            throw new Error(json.error || "Unknown error");
-          }
-
-          syncedCount++;
-
-          // Update user stats from last successful sync
-          if (json.data.user_stats) {
-            lastUserStats = json.data.user_stats;
-          }
-
-        } catch (e) {
-          console.error(`Failed to sync gallery ${gallery.name}:`, e);
-          errorCount++;
-        }
-
-        // Wait 3 seconds before next gallery (except for last one)
-        if (i < galleries.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-      }
-
-      // Update user header with last stats
-      if (lastUserStats && lastUserStats.username) {
-        const headerEl = document.getElementById("user-header");
-        const watchers = lastUserStats.watchers ?? 0;
-        const watchersDiff = lastUserStats.watchers_diff ?? 0;
-        const profileUrl =
-          lastUserStats.profile_url || `https://www.deviantart.com/${lastUserStats.username}`;
-
-        let diffHtml = "";
-        if (watchersDiff > 0) {
-          diffHtml = ` <span class="positive">(+${watchersDiff})</span>`;
-        } else if (watchersDiff < 0) {
-          diffHtml = ` <span class="negative">(${watchersDiff})</span>`;
-        }
-
-        headerEl.innerHTML = `&mdash; <a href="${profileUrl}" target="_blank" rel="noopener">watchers: ${watchers}</a>${diffHtml}`;
-      }
-
-      const statusMsg = errorCount > 0
-        ? `Synced ${syncedCount}/${galleries.length} galleries (${errorCount} failed)`
-        : `Successfully synced all ${syncedCount} galleries`;
-      setStatus(statusMsg, errorCount > 0 ? "error" : "success");
-
-      await loadStats();
-    } catch (e) {
-      setStatus("Error: " + e.message, "error");
-    }
-  }
-
   function renderGalleries() {
     const container = document.getElementById("galleries-list");
     const galleries = optionsCache.galleries || [];
@@ -449,6 +365,7 @@
 
       if (json.success) {
         setStatus("Worker started", "success");
+        updateWorkerUI(true);
         startWorkerPolling();
       } else {
         setStatus("Failed to start worker: " + (json.message || json.error), "error");
@@ -503,13 +420,10 @@
   function updateWorkerUI(running, data = null) {
     const startBtn = document.getElementById("btn-start-worker");
     const stopBtn = document.getElementById("btn-stop-worker");
-    const statusDiv = document.getElementById("worker-status");
-    const statusText = document.getElementById("worker-status-text");
 
     if (running) {
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      statusDiv.style.display = "block";
+      if (startBtn) startBtn.disabled = true;
+      if (stopBtn) stopBtn.disabled = false;
 
       if (data) {
         let statusMsg = `Worker running: ${data.processed_galleries} galleries, ${data.processed_deviations} deviations`;
@@ -519,13 +433,13 @@
         if (data.errors > 0) {
           statusMsg += ` | Errors: ${data.errors}`;
         }
-        statusText.textContent = statusMsg;
+        setStatus(statusMsg);
+      } else {
+        setStatus("Worker running...");
       }
     } else {
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      statusDiv.style.display = "none";
-      statusText.textContent = "";
+      if (startBtn) startBtn.disabled = false;
+      if (stopBtn) stopBtn.disabled = true;
     }
   }
 
@@ -554,7 +468,6 @@
   });
 
   // Expose for inline handlers
-  window.syncStats = syncStats;
   window.loadStats = loadStats;
   window.combinedSort = combinedSort;
   window.sortBy = sortBy;
