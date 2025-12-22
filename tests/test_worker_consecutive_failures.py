@@ -353,3 +353,62 @@ class TestMassFaveServiceConsecutiveFailures:
         status = service.get_worker_status()
         assert status["processed"] == 1
         assert status["consecutive_failures"] == 0
+
+    @patch("src.service.mass_fave_service.random.uniform", return_value=0)
+    def test_http_400_too_many_favourites_is_left_pending_and_worker_stops(
+        self, _uniform_mock: MagicMock
+    ) -> None:
+        """HTTP 400 invalid_request (error_code=4) should not delete and must stop worker."""
+
+        service = self._create_service()
+
+        # Make the worker exit if it ever reaches the 3rd queue check.
+        call_count = 0
+
+        def get_one_pending():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"deviationid": "dev1"}
+            if call_count == 2:
+                return {"deviationid": "dev2"}
+
+            service._stop_flag.set()
+            return None
+
+        service.repo.get_one_pending.side_effect = get_one_pending
+
+        response_400 = MagicMock()
+        response_400.status_code = 400
+        response_400.text = (
+            '{"error":"invalid_request","error_description":"You have added too '
+            'many favourites in a short period of time.","error_code":4}'
+        )
+        response_400.json.return_value = {
+            "error": "invalid_request",
+            "error_description": "You have added too many favourites in a short period of time.",
+            "error_code": 4,
+        }
+        http_error = requests.HTTPError("400 Client Error", response=response_400)
+
+        def post_side_effect(*args, **kwargs):
+            raise http_error
+
+        service.http_client.post.side_effect = post_side_effect
+
+        result = service.start_worker(access_token="token")
+        assert result["success"] is True
+
+        assert service._worker_thread is not None
+        service._worker_thread.join(timeout=5)
+
+        # Must NOT be removed from DB; keep pending and retry later.
+        service.repo.delete_deviation.assert_not_called()
+        service.repo.mark_faved.assert_not_called()
+        service.repo.mark_failed.assert_not_called()
+        service.repo.bump_attempt.assert_called_once()
+        assert service.repo.bump_attempt.call_args[0][0] == "dev1"
+
+        status = service.get_worker_status()
+        assert status["running"] is False
+        assert status["processed"] == 0

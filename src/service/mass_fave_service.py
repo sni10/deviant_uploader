@@ -296,6 +296,23 @@ class MassFaveService:
                             error_parts.append(str(error_desc))
                         error_msg = ": ".join([error_parts[0], " ".join(error_parts[1:])])
 
+                        # Special case: DA rate limit for faving returns HTTP 400
+                        # invalid_request with error_code=4. This is retryable, but
+                        # we must stop the worker to avoid hammering the API.
+                        if status_code == 400 and error_code in (4, "4"):
+                            self.repo.bump_attempt(deviationid, error_msg)
+                            with self._stats_lock:
+                                self._worker_stats["errors"] += 1
+                                self._worker_stats["last_error"] = error_msg
+                                self._worker_stats["consecutive_failures"] = 0
+
+                            self.logger.warning(
+                                "Rate limit detected, leaving deviation pending and stopping worker: %s (%s)",
+                                deviationid,
+                                error_msg,
+                            )
+                            break
+
                         self.repo.delete_deviation(deviationid)
                         with self._stats_lock:
                             self._worker_stats["errors"] += 1
