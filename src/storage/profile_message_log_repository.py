@@ -14,11 +14,13 @@ class ProfileMessageLogRepository(BaseRepository):
 
         Handles both SQLAlchemy connections and raw SQLite connections.
         """
-        if hasattr(self.conn, '_session'):
-            return self.conn._session.execute(statement)
-        else:
-            compiled = statement.compile(compile_kwargs={"literal_binds": True})
-            return self.conn.execute(str(compiled))
+        if hasattr(self.conn, "_session"):
+            # Use the DBConnection wrapper to ensure thread-safety and
+            # automatic rollback on DBAPI/SQLAlchemy errors.
+            return self.conn.execute(statement)
+
+        compiled = statement.compile(compile_kwargs={"literal_binds": True})
+        return self.conn.execute(str(compiled))
 
     def _scalar(self, statement) -> int | str | None:
         """Execute statement and return first column of the first row."""

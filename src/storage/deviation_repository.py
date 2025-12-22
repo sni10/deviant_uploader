@@ -3,7 +3,8 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import desc, insert, select, update
+from sqlalchemy import desc, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..domain.models import Deviation, UploadStatus
 from .base_repository import BaseRepository
@@ -30,41 +31,51 @@ class DeviationRepository(BaseRepository):
         """
         table = DeviationModel.__table__
 
+        values = {
+            "filename": deviation.filename,
+            "title": deviation.title,
+            "file_path": deviation.file_path,
+            "status": deviation.status.value,
+            "is_mature": 1 if deviation.is_mature else 0,
+            "mature_level": deviation.mature_level,
+            "mature_classification": (
+                json.dumps(deviation.mature_classification)
+                if deviation.mature_classification
+                else None
+            ),
+            "feature": 1 if deviation.feature else 0,
+            "allow_comments": 1 if deviation.allow_comments else 0,
+            "display_resolution": deviation.display_resolution,
+            "tags": json.dumps(deviation.tags) if deviation.tags else None,
+            "allow_free_download": 1 if deviation.allow_free_download else 0,
+            "add_watermark": 1 if deviation.add_watermark else 0,
+            "is_ai_generated": 1 if deviation.is_ai_generated else 0,
+            "noai": 1 if deviation.noai else 0,
+            "artist_comments": deviation.artist_comments,
+            "original_url": deviation.original_url,
+            "is_dirty": 1 if deviation.is_dirty else 0,
+            "stack": deviation.stack,
+            "stackid": deviation.stackid,
+            "itemid": deviation.itemid,
+            "gallery_id": deviation.gallery_id,
+            "deviationid": deviation.deviationid,
+            "url": deviation.url,
+            "error": deviation.error,
+            "created_at": deviation.created_at,
+            "uploaded_at": deviation.uploaded_at,
+            "published_time": deviation.published_time,
+        }
+
+        # Preserve created_at for existing rows on conflict.
+        update_values = dict(values)
+        update_values.pop("created_at", None)
+
         stmt = (
-            insert(table)
-            .values(
-                filename=deviation.filename,
-                title=deviation.title,
-                file_path=deviation.file_path,
-                status=deviation.status.value,
-                is_mature=1 if deviation.is_mature else 0,
-                mature_level=deviation.mature_level,
-                mature_classification=(
-                    json.dumps(deviation.mature_classification)
-                    if deviation.mature_classification
-                    else None
-                ),
-                feature=1 if deviation.feature else 0,
-                allow_comments=1 if deviation.allow_comments else 0,
-                display_resolution=deviation.display_resolution,
-                tags=json.dumps(deviation.tags) if deviation.tags else None,
-                allow_free_download=1 if deviation.allow_free_download else 0,
-                add_watermark=1 if deviation.add_watermark else 0,
-                is_ai_generated=1 if deviation.is_ai_generated else 0,
-                noai=1 if deviation.noai else 0,
-                artist_comments=deviation.artist_comments,
-                original_url=deviation.original_url,
-                is_dirty=1 if deviation.is_dirty else 0,
-                stack=deviation.stack,
-                stackid=deviation.stackid,
-                itemid=deviation.itemid,
-                gallery_id=deviation.gallery_id,
-                deviationid=deviation.deviationid,
-                url=deviation.url,
-                error=deviation.error,
-                created_at=deviation.created_at,
-                uploaded_at=deviation.uploaded_at,
-                published_time=deviation.published_time,
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[table.c.filename],
+                set_=update_values,
             )
             .returning(table.c.id)
         )

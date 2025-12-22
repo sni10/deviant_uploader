@@ -491,12 +491,71 @@
       if (!json.success) throw new Error(json.error);
 
       const result = json.data;
-      const msg = `Fetched ${result.watchers_count} watchers${result.has_more ? " (more available)" : ""}`;
+      let msg = `Fetched ${result.watchers_count} watchers${
+        result.has_more ? " (more available)" : ""
+      }`;
+
+      if (result.pruned) {
+        msg += `; removed ${result.deleted_count || 0} unfollowed from DB`;
+      } else if (result.has_more) {
+        msg += "; DB prune skipped (increase Max Watchers to fetch full list)";
+      }
+
       setStatus(msg, "success");
       await fetchStatus();
       await loadWatchersList(); // Load the list after fetching
+      await loadSavedWatchers();
     } catch (e) {
       setStatus("Failed to fetch watchers: " + e.message, "error");
+    }
+  };
+
+  window.pruneUnfollowedWatchers = async function () {
+    const username = document.getElementById("username-input").value.trim();
+    const maxWatchers = parseInt(
+      document.getElementById("max-watchers-input").value,
+      10
+    );
+
+    if (!username) {
+      setStatus("Username is required", "error");
+      return;
+    }
+
+    if (maxWatchers < 1) {
+      setStatus("Max watchers must be at least 1", "error");
+      return;
+    }
+
+    if (!confirm("Sync DB and remove users who unfollowed?")) return;
+
+    setStatus(`Syncing DB watchers for ${username}...`);
+
+    try {
+      const resp = await fetch("/api/profile-messages/watchers/prune", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, max_watchers: maxWatchers }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const result = json.data;
+      let msg;
+      if (result.pruned) {
+        msg = `DB synced: removed ${result.deleted_count || 0} unfollowed watchers`;
+      } else if (result.has_more) {
+        msg =
+          "DB prune skipped: API indicates more watchers exist. Increase Max Watchers.";
+      } else {
+        msg = "DB prune skipped";
+      }
+
+      setStatus(msg, "success");
+      await loadSavedWatchers();
+    } catch (e) {
+      setStatus("Failed to sync DB watchers: " + e.message, "error");
     }
   };
 

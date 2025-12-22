@@ -143,6 +143,48 @@ def register_profile_message_routes(
             g.logger.error(f"Fetch watchers failed: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
 
+    @app.route("/api/profile-messages/watchers/prune", methods=["POST"])
+    def prune_unfollowed_watchers():
+        """Remove unfollowed watchers from database based on current DA list."""
+        try:
+            data = request.get_json() or {}
+            username = data.get("username", "").strip()
+            max_watchers = int(data.get("max_watchers", 500))
+
+            if not username:
+                return jsonify({"success": False, "error": "Username is required"}), 400
+
+            if max_watchers < 1 or max_watchers > 5000:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "max_watchers must be between 1 and 5000",
+                        }
+                    ),
+                    400,
+                )
+
+            auth_service, _stats_service = get_services()
+
+            if not auth_service.ensure_authenticated():
+                return jsonify({"success": False, "error": "Not authenticated"}), 401
+
+            access_token = auth_service.get_valid_token()
+            if not access_token:
+                return (
+                    jsonify({"success": False, "error": "Failed to obtain access token"}),
+                    401,
+                )
+
+            service = get_profile_message_service()
+            result = service.prune_unfollowed_watchers(access_token, username, max_watchers)
+
+            return jsonify({"success": True, "data": result})
+        except Exception as e:  # noqa: BLE001
+            g.logger.error(f"Prune watchers failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+
     @app.route("/api/profile-messages/worker/start", methods=["POST"])
     def start_broadcast_worker():
         """Start worker to broadcast message to watchers queue.

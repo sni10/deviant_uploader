@@ -56,23 +56,29 @@ class ProfileMessageService:
 
     # ========== Watchers Collection ==========
 
-    def fetch_watchers(
-        self, access_token: str, username: str, max_watchers: int = 50
-    ) -> dict:
-        """Fetch watchers for given user.
+    def _fetch_watchers_from_api(
+        self, access_token: str, username: str, max_watchers: int
+    ) -> tuple[list[dict], int, bool, bool]:
+        """Fetch watchers list from DeviantArt API and upsert into database.
 
         Args:
-            access_token: OAuth access token
-            username: Username to fetch watchers for
-            max_watchers: Maximum number of watchers to fetch
+            access_token: OAuth access token.
+            username: Username to fetch watchers for.
+            max_watchers: Maximum number of watchers to fetch.
 
         Returns:
-            Dictionary with results: {watchers_count, has_more}
+            Tuple of:
+            - watchers_list: List of dicts for in-memory queue
+            - watchers_fetched: How many watchers were collected
+            - has_more: Whether API indicates more watchers exist beyond fetched
+            - fetch_failed: True if HTTP request failed before completion
         """
         offset = 0
         limit = 50  # API limit
         watchers_fetched = 0
-        watchers_list = []
+        watchers_list: list[dict] = []
+        has_more = False
+        fetch_failed = False
 
         self.logger.info(
             "Fetching watchers for %s: max=%s, limit=%s",
@@ -91,30 +97,38 @@ class ProfileMessageService:
             try:
                 url = self.WATCHERS_URL.format(username=username)
                 response = self.http_client.get(url, params=params, timeout=30)
-                data = response.json()
+                data = response.json() or {}
             except requests.RequestException as e:
+                fetch_failed = True
                 self.logger.error("Watchers fetch failed: %s", e)
+                break
+
+            if not isinstance(data, dict):
+                fetch_failed = True
+                self.logger.error("Watchers fetch returned non-dict JSON: %r", data)
                 break
 
             results = data.get("results", [])
             for watcher in results:
-                user = watcher.get("user", {})
+                user = watcher.get("user", {}) if isinstance(watcher, dict) else {}
                 watcher_username = user.get("username")
                 watcher_userid = user.get("userid")
 
                 if watcher_username and watcher_userid:
-                    watchers_list.append({
-                        "username": watcher_username,
-                        "userid": watcher_userid,
-                        "selected": True,  # Selected by default
-                    })
+                    watchers_list.append(
+                        {
+                            "username": watcher_username,
+                            "userid": watcher_userid,
+                            "selected": True,  # Selected by default
+                        }
+                    )
 
                     # Save to database
                     try:
                         self.watcher_repo.add_or_update_watcher(
                             watcher_username, watcher_userid
                         )
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         self.logger.warning(
                             "Failed to save watcher %s: %s", watcher_username, e
                         )
@@ -124,11 +138,16 @@ class ProfileMessageService:
                 if watchers_fetched >= max_watchers:
                     break
 
-            has_more = data.get("has_more", False)
+            has_more = bool(data.get("has_more", False))
             next_offset = data.get("next_offset")
 
             if next_offset is not None:
-                offset = next_offset
+                try:
+                    offset = int(next_offset)
+                except (TypeError, ValueError):
+                    offset += limit
+            else:
+                offset += limit
 
             if not has_more or watchers_fetched >= max_watchers:
                 break
@@ -140,16 +159,44 @@ class ProfileMessageService:
             )
             time.sleep(delay)
 
+        return watchers_list, watchers_fetched, has_more, fetch_failed
+
+    def fetch_watchers(
+        self, access_token: str, username: str, max_watchers: int = 50
+    ) -> dict:
+        """Fetch watchers for given user.
+
+        Args:
+            access_token: OAuth access token
+            username: Username to fetch watchers for
+            max_watchers: Maximum number of watchers to fetch
+
+        Returns:
+            Dictionary with results: {watchers_count, has_more}
+        """
+        watchers_list, watchers_fetched, has_more, fetch_failed = (
+            self._fetch_watchers_from_api(access_token, username, max_watchers)
+        )
+
         self.logger.info("Fetched %s watchers for %s", watchers_fetched, username)
 
-        # Synchronize database: remove watchers who unfollowed
-        if watchers_list:
+        # Synchronize database: remove watchers who unfollowed.
+        # IMPORTANT: do this only when we have the full list; otherwise we could
+        # accidentally delete watchers that are simply beyond max_watchers.
+        deleted_count = 0
+        pruned = False
+        if not fetch_failed and not has_more:
             current_usernames = [w["username"] for w in watchers_list]
             try:
-                deleted_count = self.watcher_repo.delete_watchers_not_in_list(current_usernames)
+                deleted_count = int(
+                    self.watcher_repo.delete_watchers_not_in_list(current_usernames)
+                )
+                pruned = True
                 if deleted_count > 0:
-                    self.logger.info("Removed %s unfollowed watchers from database", deleted_count)
-            except Exception as e:
+                    self.logger.info(
+                        "Removed %s unfollowed watchers from database", deleted_count
+                    )
+            except Exception as e:  # noqa: BLE001
                 self.logger.warning("Failed to synchronize watchers: %s", e)
 
         # Store in queue
@@ -158,7 +205,53 @@ class ProfileMessageService:
 
         return {
             "watchers_count": watchers_fetched,
-            "has_more": data.get("has_more", False) if watchers_fetched < max_watchers else True,
+            "has_more": has_more,
+            "pruned": pruned,
+            "deleted_count": deleted_count,
+            "fetch_failed": fetch_failed,
+        }
+
+    def prune_unfollowed_watchers(
+        self, access_token: str, username: str, max_watchers: int = 500
+    ) -> dict:
+        """Synchronize saved watchers by removing users who unfollowed.
+
+        This action fetches the current watchers list from DeviantArt, upserts
+        those watchers into the database, and deletes database rows for users
+        that are no longer present.
+
+        Safety:
+            Pruning is executed only if the full list was fetched
+            (API returns has_more=False). If max_watchers is too low and
+            has_more=True, the method will return pruned=False.
+
+        Args:
+            access_token: OAuth access token.
+            username: Username to fetch watchers for.
+            max_watchers: Maximum number of watchers to fetch.
+
+        Returns:
+            Dictionary with results: {watchers_count, has_more, pruned, deleted_count}.
+        """
+
+        watchers_list, watchers_fetched, has_more, fetch_failed = (
+            self._fetch_watchers_from_api(access_token, username, max_watchers)
+        )
+
+        deleted_count = 0
+        pruned = False
+        if not fetch_failed and not has_more:
+            current_usernames = [w["username"] for w in watchers_list]
+            deleted_count = int(
+                self.watcher_repo.delete_watchers_not_in_list(current_usernames)
+            )
+            pruned = True
+
+        return {
+            "watchers_count": watchers_fetched,
+            "has_more": has_more,
+            "pruned": pruned,
+            "deleted_count": deleted_count,
         }
 
     # ========== Worker ==========

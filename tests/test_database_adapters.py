@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import insert, select, text
+from sqlalchemy.exc import InternalError
 
 from src.storage.adapters import SQLAlchemyAdapter
+from src.storage.adapters.sqlalchemy_adapter import SQLAlchemyConnection
 from src.storage.adapters.base import DatabaseAdapter
 from src.storage.base_repository import DBConnection
 from src.storage.database import get_database_adapter
@@ -39,6 +42,48 @@ class TestSQLAlchemyConnection:
 
         result = db_conn.execute(select(users.c.username).where(users.c.userid == "u-1"))
         assert result.scalar_one() == "name"
+
+    def test_execute_rolls_back_on_internal_error(self):
+        """Execute should rollback the Session if DBAPI/SQLAlchemy error occurs."""
+
+        class DummySession:
+            def __init__(self) -> None:
+                self.rolled_back = False
+
+            def execute(self, _statement, _parameters=None):
+                raise InternalError("SELECT 1", None, Exception("boom"))
+
+            def rollback(self) -> None:
+                self.rolled_back = True
+
+        session = DummySession()
+        conn = SQLAlchemyConnection(session)  # type: ignore[arg-type]
+
+        with pytest.raises(InternalError):
+            conn.execute("SELECT 1")
+
+        assert session.rolled_back is True
+
+    def test_commit_rolls_back_on_internal_error(self):
+        """Commit should rollback the Session if commit fails."""
+
+        class DummySession:
+            def __init__(self) -> None:
+                self.rolled_back = False
+
+            def commit(self) -> None:
+                raise InternalError("COMMIT", None, Exception("boom"))
+
+            def rollback(self) -> None:
+                self.rolled_back = True
+
+        session = DummySession()
+        conn = SQLAlchemyConnection(session)  # type: ignore[arg-type]
+
+        with pytest.raises(InternalError):
+            conn.commit()
+
+        assert session.rolled_back is True
 
 
 class TestSQLAlchemyAdapter:

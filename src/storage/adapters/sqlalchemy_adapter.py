@@ -5,6 +5,7 @@ import threading
 from typing import Any
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 
@@ -42,19 +43,29 @@ class SQLAlchemyConnection:
         """
 
         with self._lock:
-            if isinstance(statement, str):
-                stmt = text(statement)
-            else:
-                stmt = statement
+            try:
+                if isinstance(statement, str):
+                    stmt = text(statement)
+                else:
+                    stmt = statement
 
-            if parameters is None:
-                return self._session.execute(stmt)
-            return self._session.execute(stmt, parameters)
+                if parameters is None:
+                    return self._session.execute(stmt)
+                return self._session.execute(stmt, parameters)
+            except SQLAlchemyError:
+                # When a DBAPI error occurs (e.g. PostgreSQL InFailedSqlTransaction),
+                # the Session is left in a failed state until rollback().
+                self._session.rollback()
+                raise
     
     def commit(self) -> None:
         """Commit the current transaction."""
         with self._lock:
-            self._session.commit()
+            try:
+                self._session.commit()
+            except SQLAlchemyError:
+                self._session.rollback()
+                raise
     
     def close(self) -> None:
         """Close the database session."""

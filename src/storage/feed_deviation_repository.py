@@ -1,6 +1,7 @@
 """Repository for feed deviations queue and state management using SQLAlchemy Core."""
 
-from sqlalchemy import select, insert, update, delete, func
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .base_repository import BaseRepository
 from .feed_tables import feed_state, feed_deviations
 
@@ -72,19 +73,14 @@ class FeedDeviationRepository(BaseRepository):
             key: State key
             value: State value
         """
-        # Check if exists
-        existing = self.get_state(key)
-
-        if existing is not None:
-            # Update
-            stmt = (
-                update(feed_state)
-                .where(feed_state.c.key == key)
-                .values(value=value, updated_at=func.current_timestamp())
+        stmt = (
+            pg_insert(feed_state)
+            .values(key=key, value=value)
+            .on_conflict_do_update(
+                index_elements=[feed_state.c.key],
+                set_={"value": value, "updated_at": func.current_timestamp()},
             )
-        else:
-            # Insert
-            stmt = insert(feed_state).values(key=key, value=value)
+        )
 
         self._execute_core(stmt)
         self.conn.commit()
@@ -101,27 +97,22 @@ class FeedDeviationRepository(BaseRepository):
             ts: Unix timestamp from feed event
             status: Status (pending/faved/failed), defaults to 'pending'
         """
-        # Try to get existing
-        stmt = select(feed_deviations.c.ts).where(
-            feed_deviations.c.deviationid == deviationid
+        insert_stmt = pg_insert(feed_deviations).values(
+            deviationid=deviationid,
+            ts=ts,
+            status=status,
         )
-        result = self._execute_core(stmt)
-        existing_row = result.fetchone()
 
-        if existing_row is not None:
-            # Update: use max of current and new timestamp
-            existing_ts = existing_row[0]
-            new_ts = max(existing_ts, ts)
-            stmt = (
-                update(feed_deviations)
-                .where(feed_deviations.c.deviationid == deviationid)
-                .values(ts=new_ts, updated_at=func.current_timestamp())
-            )
-        else:
-            # Insert new
-            stmt = insert(feed_deviations).values(
-                deviationid=deviationid, ts=ts, status=status
-            )
+        # Preserve existing semantics:
+        # - for existing rows update only ts (max(existing, incoming)) and updated_at
+        # - do NOT touch status/attempts/last_error on conflict
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[feed_deviations.c.deviationid],
+            set_={
+                "ts": func.greatest(feed_deviations.c.ts, insert_stmt.excluded.ts),
+                "updated_at": func.current_timestamp(),
+            },
+        )
 
         self._execute_core(stmt)
         self.conn.commit()
