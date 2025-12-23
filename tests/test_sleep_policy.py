@@ -26,6 +26,11 @@ class TestSleepPolicy:
         watcher_repo = MagicMock()
         logger = MagicMock()
 
+        # Mock config to avoid environment variable requirements
+        mock_config = MagicMock()
+        mock_config.broadcast_min_delay_seconds = 60
+        mock_config.broadcast_max_delay_seconds = 180
+
         http_client = MagicMock()
         http_client.get_recommended_delay.return_value = 7
 
@@ -50,6 +55,7 @@ class TestSleepPolicy:
             watcher_repo=watcher_repo,
             logger=logger,
             http_client=http_client,
+            config=mock_config,
         )
 
         service.fetch_watchers(access_token="token", username="me", max_watchers=100)

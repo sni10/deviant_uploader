@@ -33,6 +33,7 @@ class ProfileMessageService:
         watcher_repo: WatcherRepository,
         logger: Logger,
         http_client: Optional[DeviantArtHttpClient] = None,
+        config: Optional[object] = None,
     ) -> None:
         self.message_repo = message_repo
         self.log_repo = log_repo
@@ -40,7 +41,7 @@ class ProfileMessageService:
         self.watcher_repo = watcher_repo
         self.logger = logger
         self.http_client = http_client or DeviantArtHttpClient(logger=logger)
-        self.config = get_config()
+        self._config = config
 
         # Worker state
         self._worker_thread: Optional[threading.Thread] = None
@@ -58,6 +59,13 @@ class ProfileMessageService:
         # Each item: {"username": str, "userid": str, "selected": bool}
         self._watchers_queue: list[dict] = []
         self._queue_lock = threading.Lock()
+
+    @property
+    def config(self):
+        """Lazy-load config if not provided during initialization."""
+        if self._config is None:
+            self._config = get_config()
+        return self._config
 
     # ========== Watchers Collection ==========
 
