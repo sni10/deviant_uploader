@@ -1,6 +1,10 @@
 """Repository for daily deviation statistics snapshots."""
 
+from sqlalchemy import desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from .base_repository import BaseRepository
+from .models import StatsSnapshot
 
 
 class StatsSnapshotRepository(BaseRepository):
@@ -36,21 +40,31 @@ class StatsSnapshotRepository(BaseRepository):
         Returns:
             Row ID of inserted/updated record
         """
-        cursor = self.conn.execute(
-            """
-            INSERT INTO stats_snapshots (
-                deviationid, snapshot_date, views, favourites, comments, updated_at
-            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(deviationid, snapshot_date) DO UPDATE SET
-                views=excluded.views,
-                favourites=excluded.favourites,
-                comments=excluded.comments,
-                updated_at=CURRENT_TIMESTAMP
-            """,
-            (deviationid, snapshot_date, views, favourites, comments),
+        table = StatsSnapshot.__table__
+
+        stmt = (
+            pg_insert(table)
+            .values(
+                deviationid=deviationid,
+                snapshot_date=snapshot_date,
+                views=views,
+                favourites=favourites,
+                comments=comments,
+            )
+            .on_conflict_do_update(
+                index_elements=[table.c.deviationid, table.c.snapshot_date],
+                set_={
+                    "views": views,
+                    "favourites": favourites,
+                    "comments": comments,
+                },
+            )
+            .returning(table.c.id)
         )
+
+        row_id = self._execute(stmt).scalar_one()
         self.conn.commit()
-        return cursor.lastrowid
+        return int(row_id)
 
     def get_snapshots_for_deviation(
         self, deviationid: str, limit: int = 30
@@ -64,20 +78,24 @@ class StatsSnapshotRepository(BaseRepository):
         Returns:
             List of dictionaries with snapshot fields, ordered by date descending
         """
-        cursor = self.conn.execute(
-            """
-            SELECT 
-                id, deviationid, snapshot_date, views, favourites, comments,
-                created_at, updated_at
-            FROM stats_snapshots
-            WHERE deviationid = ?
-            ORDER BY snapshot_date DESC
-            LIMIT ?
-            """,
-            (deviationid, limit),
+        table = StatsSnapshot.__table__
+        stmt = (
+            select(
+                table.c.id,
+                table.c.deviationid,
+                table.c.snapshot_date,
+                table.c.views,
+                table.c.favourites,
+                table.c.comments,
+                table.c.created_at,
+                table.c.updated_at,
+            )
+            .where(table.c.deviationid == deviationid)
+            .order_by(desc(table.c.snapshot_date))
+            .limit(limit)
         )
-        columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        return [dict(row) for row in self._execute(stmt).mappings().all()]
 
     def get_latest_snapshot(self, deviationid: str) -> dict | None:
         """Get the most recent snapshot for a deviation.
@@ -88,20 +106,20 @@ class StatsSnapshotRepository(BaseRepository):
         Returns:
             Dictionary with snapshot fields, or None if no snapshots exist
         """
-        cursor = self.conn.execute(
-            """
-            SELECT
-                id, deviationid, snapshot_date, views, favourites, comments,
-                created_at, updated_at
-            FROM stats_snapshots
-            WHERE deviationid = ?
-            ORDER BY snapshot_date DESC
-            LIMIT 1
-            """,
-            (deviationid,),
+        table = StatsSnapshot.__table__
+        stmt = (
+            select(
+                table.c.id,
+                table.c.deviationid,
+                table.c.snapshot_date,
+                table.c.views,
+                table.c.favourites,
+                table.c.comments,
+                table.c.created_at,
+                table.c.updated_at,
+            )
+            .where(table.c.deviationid == deviationid)
+            .order_by(desc(table.c.snapshot_date))
+            .limit(1)
         )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        columns = [desc[0] for desc in cursor.description]
-        return dict(zip(columns, row))
+        return self._execute(stmt).mappings().first()

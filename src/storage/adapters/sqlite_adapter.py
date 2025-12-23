@@ -1,4 +1,13 @@
-"""SQLite database adapter implementation."""
+"""SQLite database adapter implementation (deprecated).
+
+This project has migrated to PostgreSQL and no longer supports SQLite.
+The module is kept only to provide a clear error if imported by legacy code.
+"""
+
+raise RuntimeError(
+    "SQLite backend has been deprecated and removed. "
+    "Configure PostgreSQL via DATABASE_URL/DB_* and use SQLAlchemyAdapter."
+)
 
 import sqlite3
 from pathlib import Path

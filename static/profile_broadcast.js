@@ -71,11 +71,9 @@
 
       const messages = json.data || [];
       const container = document.getElementById("messages-list");
-      const select = document.getElementById("message-select");
 
       if (messages.length === 0) {
         container.innerHTML = '<p class="text-muted">No message templates created yet.</p>';
-        select.innerHTML = '<option value="">Select message template</option>';
         return;
       }
 
@@ -103,14 +101,6 @@
       `
         )
         .join("");
-
-      // Update select dropdown
-      select.innerHTML =
-        '<option value="">Select message template</option>' +
-        messages
-          .filter((m) => m.is_active)
-          .map((m) => `<option value="${m.message_id}">${escapeHtml(m.title)}</option>`)
-          .join("");
     } catch (e) {
       setStatus("Failed to load messages: " + e.message, "error");
     }
@@ -248,7 +238,7 @@
             ${w.selected ? "checked" : ""}
             onchange="toggleSavedWatcherByIndex(${index}, this.checked)">
         </td>
-        <td>${escapeHtml(w.username)}</td>
+        <td><a href="https://www.deviantart.com/${escapeHtml(w.username)}" target="_blank">${escapeHtml(w.username)}</a></td>
         <td>${escapeHtml(w.userid)}</td>
         <td>${formatFetchedAt(w.fetched_at)}</td>
       </tr>
@@ -411,7 +401,7 @@
               ${w.selected ? "checked" : ""}
               onchange="toggleWatcher('${escapeHtml(w.username)}', this.checked)">
           </td>
-          <td>${escapeHtml(w.username)}</td>
+          <td><a href="https://www.deviantart.com/${escapeHtml(w.username)}" target="_blank">${escapeHtml(w.username)}</a></td>
           <td>${escapeHtml(w.userid)}</td>
         </tr>
       `
@@ -483,8 +473,8 @@
       return;
     }
 
-    if (maxWatchers < 1 || maxWatchers > 500) {
-      setStatus("Max watchers must be between 1 and 500", "error");
+    if (maxWatchers < 1) {
+      setStatus("Max watchers must be at least 1", "error");
       return;
     }
 
@@ -501,12 +491,71 @@
       if (!json.success) throw new Error(json.error);
 
       const result = json.data;
-      const msg = `Fetched ${result.watchers_count} watchers${result.has_more ? " (more available)" : ""}`;
+      let msg = `Fetched ${result.watchers_count} watchers${
+        result.has_more ? " (more available)" : ""
+      }`;
+
+      if (result.pruned) {
+        msg += `; removed ${result.deleted_count || 0} unfollowed from DB`;
+      } else if (result.has_more) {
+        msg += "; DB prune skipped (increase Max Watchers to fetch full list)";
+      }
+
       setStatus(msg, "success");
       await fetchStatus();
       await loadWatchersList(); // Load the list after fetching
+      await loadSavedWatchers();
     } catch (e) {
       setStatus("Failed to fetch watchers: " + e.message, "error");
+    }
+  };
+
+  window.pruneUnfollowedWatchers = async function () {
+    const username = document.getElementById("username-input").value.trim();
+    const maxWatchers = parseInt(
+      document.getElementById("max-watchers-input").value,
+      10
+    );
+
+    if (!username) {
+      setStatus("Username is required", "error");
+      return;
+    }
+
+    if (maxWatchers < 1) {
+      setStatus("Max watchers must be at least 1", "error");
+      return;
+    }
+
+    if (!confirm("Sync DB and remove users who unfollowed?")) return;
+
+    setStatus(`Syncing DB watchers for ${username}...`);
+
+    try {
+      const resp = await fetch("/api/profile-messages/watchers/prune", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, max_watchers: maxWatchers }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error);
+
+      const result = json.data;
+      let msg;
+      if (result.pruned) {
+        msg = `DB synced: removed ${result.deleted_count || 0} unfollowed watchers`;
+      } else if (result.has_more) {
+        msg =
+          "DB prune skipped: API indicates more watchers exist. Increase Max Watchers.";
+      } else {
+        msg = "DB prune skipped";
+      }
+
+      setStatus(msg, "success");
+      await loadSavedWatchers();
+    } catch (e) {
+      setStatus("Failed to sync DB watchers: " + e.message, "error");
     }
   };
 
@@ -529,27 +578,43 @@
     }
   };
 
-  window.startWorker = async function () {
-    const messageId = document.getElementById("message-select").value;
+  window.retryFailedMessages = async function () {
+    if (!confirm("Retry all failed messages? This will add them back to the queue.")) return;
 
-    if (!messageId) {
-      setStatus("Please select a message template", "error");
-      return;
+    setStatus("Adding failed messages to retry queue...");
+
+    try {
+      const resp = await fetch("/api/profile-messages/queue/retry-failed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 100 }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error || json.message);
+
+      setStatus(json.message || `Added ${json.added_count} failed messages to retry queue`, "success");
+      await fetchStatus();
+      await loadWatchersList();
+    } catch (e) {
+      setStatus("Failed to retry messages: " + e.message, "error");
     }
+  };
 
+  window.startWorker = async function () {
     setStatus("Starting broadcast worker...");
 
     try {
       const resp = await fetch("/api/profile-messages/worker/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message_id: parseInt(messageId, 10) }),
+        body: JSON.stringify({}),
       });
       const json = await resp.json();
 
       if (!json.success) throw new Error(json.message || json.error);
 
-      setStatus("Broadcast worker started", "success");
+      setStatus("Broadcast worker started - will use random active templates", "success");
       await fetchStatus();
 
       // Start polling

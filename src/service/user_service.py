@@ -13,6 +13,7 @@ from logging import Logger
 
 from ..domain.models import User
 from ..storage import UserRepository
+from .http_client import DeviantArtHttpClient
 
 
 class UserService:
@@ -27,16 +28,23 @@ class UserService:
     
     BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
     
-    def __init__(self, user_repository: UserRepository, logger: Logger):
+    def __init__(
+        self,
+        user_repository: UserRepository,
+        logger: Logger,
+        http_client: Optional[DeviantArtHttpClient] = None,
+    ):
         """
         Initialize user service.
         
         Args:
             user_repository: User repository for database operations
             logger: Logger instance
+            http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.user_repository = user_repository
         self.logger = logger
+        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
     
     def fetch_whoami(self, access_token: str) -> Optional[dict]:
         """
@@ -59,8 +67,7 @@ class UserService:
         
         try:
             self.logger.info("Fetching authenticated user info from /user/whoami...")
-            response = requests.get(url, params=params)
-            response.raise_for_status()
+            response = self.http_client.get(url, params=params)
             data = response.json()
             
             self.logger.info(f"Successfully fetched user info for: {data.get('username')}")
@@ -109,8 +116,7 @@ class UserService:
         
         try:
             self.logger.info(f"Fetching profile info for user: {username}...")
-            response = requests.get(url, params=params)
-            response.raise_for_status()
+            response = self.http_client.get(url, params=params)
             data = response.json()
             
             self.logger.info(f"Successfully fetched profile for: {username}")

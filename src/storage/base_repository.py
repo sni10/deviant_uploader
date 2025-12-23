@@ -15,8 +15,12 @@ class DBConnection(Protocol):
     without changing repository logic.
     """
 
-    def execute(self, sql: str, parameters: Any | None = None) -> Any:
-        """Execute a SQL statement and return a cursor-like object."""
+    def execute(self, statement: Any, parameters: Any | None = None) -> Any:
+        """Execute a statement and return a result-like object.
+
+        In PostgreSQL-only mode, repositories primarily execute SQLAlchemy Core
+        statements.
+        """
 
     def commit(self) -> None:
         """Commit the current transaction."""
@@ -61,3 +65,22 @@ class BaseRepository(ABC):
 
         if self._conn:
             self._conn.close()
+
+    def _execute(self, statement: Any, parameters: Any | None = None) -> Any:
+        """Execute a statement using the underlying connection."""
+
+        return self._conn.execute(statement, parameters)
+
+    def _scalar(self, statement: Any, parameters: Any | None = None) -> Any:
+        """Execute a statement and return scalar value.
+
+        Works with SQLAlchemy result objects.
+        """
+
+        result = self._execute(statement, parameters)
+        if hasattr(result, "scalar_one_or_none"):
+            return result.scalar_one_or_none()
+        if hasattr(result, "scalar"):
+            return result.scalar()
+        row = result.fetchone()
+        return None if row is None else row[0]

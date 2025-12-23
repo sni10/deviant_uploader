@@ -1,9 +1,14 @@
 """Repository for current deviation statistics."""
+
 from datetime import date, timedelta
 import json
 from typing import Optional
 
+from sqlalchemy import desc, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from .base_repository import BaseRepository
+from .models import DeviationMetadata, DeviationStats, StatsSnapshot
 
 
 class DeviationStatsRepository(BaseRepository):
@@ -41,37 +46,33 @@ class DeviationStatsRepository(BaseRepository):
         Returns:
             Row ID of inserted/updated record
         """
-        cursor = self.conn.execute(
-            """
-            INSERT INTO deviation_stats (
-                deviationid, title, thumb_url, is_mature, views, favourites, 
-                comments, gallery_folderid, url, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(deviationid) DO UPDATE SET
-                title=excluded.title,
-                thumb_url=excluded.thumb_url,
-                is_mature=excluded.is_mature,
-                views=excluded.views,
-                favourites=excluded.favourites,
-                comments=excluded.comments,
-                gallery_folderid=excluded.gallery_folderid,
-                url=excluded.url,
-                updated_at=CURRENT_TIMESTAMP
-            """,
-            (
-                deviationid,
-                title,
-                thumb_url,
-                1 if is_mature else 0,
-                views,
-                favourites,
-                comments,
-                gallery_folderid,
-                url,
-            ),
+        table = DeviationStats.__table__
+
+        values = {
+            "deviationid": deviationid,
+            "title": title,
+            "thumb_url": thumb_url,
+            "is_mature": 1 if is_mature else 0,
+            "views": views,
+            "favourites": favourites,
+            "comments": comments,
+            "gallery_folderid": gallery_folderid,
+            "url": url,
+        }
+
+        stmt = (
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[table.c.deviationid],
+                set_=values,
+            )
+            .returning(table.c.id)
         )
+
+        row_id = self._execute(stmt).scalar_one()
         self.conn.commit()
-        return cursor.lastrowid
+        return int(row_id)
 
     def get_deviation_stats(self, deviationid: str) -> Optional[dict]:
         """Retrieve deviation stats by deviation ID.
@@ -82,23 +83,10 @@ class DeviationStatsRepository(BaseRepository):
         Returns:
             Dictionary with stats fields or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT 
-                id, deviationid, title, thumb_url, is_mature, views, 
-                favourites, comments, gallery_folderid, url, 
-                created_at, updated_at
-            FROM deviation_stats
-            WHERE deviationid = ?
-            """,
-            (deviationid,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        
-        columns = [desc[0] for desc in cursor.description]
-        return dict(zip(columns, row))
+        table = DeviationStats.__table__
+        stmt = select(table).where(table.c.deviationid == deviationid)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else dict(row)
 
     def get_all_deviation_stats(self) -> list[dict]:
         """Retrieve all deviation stats ordered by views descending.
@@ -106,18 +94,9 @@ class DeviationStatsRepository(BaseRepository):
         Returns:
             List of dictionaries with stats fields
         """
-        cursor = self.conn.execute(
-            """
-            SELECT 
-                id, deviationid, title, thumb_url, is_mature, views, 
-                favourites, comments, gallery_folderid, url, 
-                created_at, updated_at
-            FROM deviation_stats
-            ORDER BY views DESC
-            """
-        )
-        columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        table = DeviationStats.__table__
+        stmt = select(table).order_by(desc(table.c.views))
+        return [dict(row) for row in self._execute(stmt).mappings().all()]
 
     def get_all_stats_with_previous(self) -> list[dict]:
         """Return all current stats plus yesterday snapshot and metadata for diffs.
@@ -129,61 +108,64 @@ class DeviationStatsRepository(BaseRepository):
             List of dictionaries with stats, yesterday's values, and metadata
         """
         yesterday = (date.today() - timedelta(days=1)).isoformat()
-        cursor = self.conn.execute(
-            """
-            SELECT
-                ds.deviationid,
-                ds.title,
-                ds.thumb_url,
-                ds.is_mature,
-                ds.views,
-                ds.favourites,
-                ds.comments,
-                ds.gallery_folderid,
-                ds.url,
-                ds.updated_at,
-                COALESCE(ss.views, 0) AS yesterday_views,
-                COALESCE(ss.favourites, 0) AS yesterday_favourites,
-                COALESCE(ss.comments, 0) AS yesterday_comments,
-                dm.description,
-                dm.license,
-                dm.allows_comments,
-                dm.tags,
-                dm.is_favourited,
-                dm.is_watching,
-                dm.mature_level,
-                dm.mature_classification,
-                dm.printid,
-                dm.author,
-                dm.creation_time,
-                dm.category,
-                dm.file_size,
-                dm.resolution,
-                dm.submitted_with,
-                dm.stats_json,
-                dm.camera,
-                dm.collections,
-                dm.galleries,
-                dm.can_post_comment,
-                dm.stats_views_today,
-                dm.stats_downloads_today,
-                dm.stats_downloads,
-                dm.stats_views,
-                dm.stats_favourites,
-                dm.stats_comments
-            FROM deviation_stats ds
-            LEFT JOIN stats_snapshots ss
-                ON ss.deviationid = ds.deviationid
-                AND ss.snapshot_date = ?
-            LEFT JOIN deviation_metadata dm
-                ON dm.deviationid = ds.deviationid
-            ORDER BY ds.views DESC
-            """,
-            (yesterday,),
+
+        ds = DeviationStats.__table__
+        ss = StatsSnapshot.__table__
+        dm = DeviationMetadata.__table__
+
+        stmt = (
+            select(
+                ds.c.deviationid,
+                ds.c.title,
+                ds.c.thumb_url,
+                ds.c.is_mature,
+                ds.c.views,
+                ds.c.favourites,
+                ds.c.comments,
+                ds.c.gallery_folderid,
+                ds.c.url,
+                ds.c.updated_at,
+                func.coalesce(ss.c.views, 0).label("yesterday_views"),
+                func.coalesce(ss.c.favourites, 0).label("yesterday_favourites"),
+                func.coalesce(ss.c.comments, 0).label("yesterday_comments"),
+                dm.c.description,
+                dm.c.license,
+                dm.c.allows_comments,
+                dm.c.tags,
+                dm.c.is_favourited,
+                dm.c.is_watching,
+                dm.c.mature_level,
+                dm.c.mature_classification,
+                dm.c.printid,
+                dm.c.author,
+                dm.c.creation_time,
+                dm.c.category,
+                dm.c.file_size,
+                dm.c.resolution,
+                dm.c.submitted_with,
+                dm.c.stats_json,
+                dm.c.camera,
+                dm.c.collections,
+                dm.c.galleries,
+                dm.c.can_post_comment,
+                dm.c.stats_views_today,
+                dm.c.stats_downloads_today,
+                dm.c.stats_downloads,
+                dm.c.stats_views,
+                dm.c.stats_favourites,
+                dm.c.stats_comments,
+            )
+            .select_from(
+                ds.outerjoin(
+                    ss,
+                    (ss.c.deviationid == ds.c.deviationid)
+                    & (ss.c.snapshot_date == yesterday),
+                ).outerjoin(dm, dm.c.deviationid == ds.c.deviationid)
+            )
+            .order_by(desc(ds.c.views))
         )
 
-        columns = [desc[0] for desc in cursor.description]
-        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        rows = [dict(row) for row in self._execute(stmt).mappings().all()]
 
         def loads(value: Optional[str]):
             if value is None:

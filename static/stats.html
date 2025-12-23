@@ -38,6 +38,9 @@
                         <a class="nav-link" href="/mass_fave.html">Auto Fave</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="/auto_comment.html">Auto Comment</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="/profile_broadcast.html">Profile Broadcast</a>
                     </li>
                 </ul>
@@ -60,11 +63,28 @@
                     </div>
                     <div class="col-md-8">
                         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-end">
-                            <button class="btn btn-primary btn-sm" onclick="syncStats()">Sync</button>
                             <button class="btn btn-outline-secondary btn-sm" onclick="loadStats()">Refresh</button>
                             <button class="btn btn-outline-dark btn-sm" onclick="combinedSort()">Sort by Score</button>
+                            <span class="border-start ps-2 ms-1"></span>
+                            <button id="btn-start-worker" class="btn btn-success btn-sm" onclick="startWorker()">Start Worker</button>
+                            <button id="btn-stop-worker" class="btn btn-danger btn-sm" onclick="stopWorker()" disabled>Stop Worker</button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0">Galleries to Sync</h6>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-secondary" onclick="selectAllGalleries()">Select All</button>
+                        <button class="btn btn-outline-secondary" onclick="deselectAllGalleries()">Deselect All</button>
+                    </div>
+                </div>
+                <div id="galleries-list" class="row g-2">
+                    <p class="text-muted small">Loading galleries...</p>
                 </div>
             </div>
         </div>

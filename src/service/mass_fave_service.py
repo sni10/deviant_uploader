@@ -9,6 +9,7 @@ from typing import Optional
 import requests
 
 from ..storage.feed_deviation_repository import FeedDeviationRepository
+from .http_client import DeviantArtHttpClient
 
 
 class MassFaveService:
@@ -16,14 +17,17 @@ class MassFaveService:
 
     FEED_URL = "https://www.deviantart.com/api/v1/oauth2/browse/deviantsyouwatch"
     FAVE_URL = "https://www.deviantart.com/api/v1/oauth2/collections/fave"
+    MAX_CONSECUTIVE_FAILURES = 5  # Stop worker after this many consecutive failures
 
     def __init__(
         self,
         feed_deviation_repo: FeedDeviationRepository,
         logger: Logger,
+        http_client: Optional[DeviantArtHttpClient] = None,
     ) -> None:
         self.repo = feed_deviation_repo
         self.logger = logger
+        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
 
         # Worker state
         self._worker_thread: Optional[threading.Thread] = None
@@ -33,6 +37,7 @@ class MassFaveService:
             "processed": 0,
             "errors": 0,
             "last_error": None,
+            "consecutive_failures": 0,
         }
         self._stats_lock = threading.Lock()
 
@@ -74,8 +79,7 @@ class MassFaveService:
             }
 
             try:
-                response = requests.get(self.FEED_URL, params=params, timeout=30)
-                response.raise_for_status()
+                response = self.http_client.get(self.FEED_URL, params=params, timeout=30)
                 data = response.json()
             except requests.RequestException as e:
                 self.logger.error("Feed fetch failed: %s", e)
@@ -115,7 +119,12 @@ class MassFaveService:
 
             # Delay between pages to avoid rate limiting
             if pages < max_pages:
-                time.sleep(2)
+                delay = self.http_client.get_recommended_delay()
+                self.logger.debug(
+                    "Waiting %s seconds before next feed page request",
+                    delay,
+                )
+                time.sleep(delay)
 
         self.logger.info(
             "Feed collection completed: pages=%s, deviations=%s, offset=%s",
@@ -146,7 +155,12 @@ class MassFaveService:
 
         self._stop_flag.clear()
         with self._stats_lock:
-            self._worker_stats = {"processed": 0, "errors": 0, "last_error": None}
+            self._worker_stats = {
+                "processed": 0,
+                "errors": 0,
+                "last_error": None,
+                "consecutive_failures": 0,
+            }
 
         self._worker_thread = threading.Thread(
             target=self._worker_loop,
@@ -190,6 +204,7 @@ class MassFaveService:
                 "processed": self._worker_stats["processed"],
                 "errors": self._worker_stats["errors"],
                 "last_error": self._worker_stats["last_error"],
+                "consecutive_failures": self._worker_stats["consecutive_failures"],
                 "queue_stats": queue_stats,
             }
 
@@ -210,81 +225,153 @@ class MassFaveService:
     def _worker_loop(self, access_token: str) -> None:
         """Background worker loop (runs in separate thread)."""
         self.logger.info("Worker loop started")
+        try:
+            while not self._stop_flag.is_set():
+                deviation = self.repo.get_one_pending()
 
-        while not self._stop_flag.is_set():
-            deviation = self.repo.get_one_pending()
+                if not deviation:
+                    # Queue empty, wait with stop_flag check (interruptible sleep)
+                    if self._stop_flag.wait(timeout=2):
+                        # Stop flag was set during wait
+                        self.logger.info("Worker stop requested during idle wait")
+                        break
+                    continue
 
-            if not deviation:
-                # Queue empty, sleep and continue
-                time.sleep(2)
-                continue
+                deviationid = deviation["deviationid"]
 
-            deviationid = deviation["deviationid"]
+                try:
+                    # Attempt to fave (HTTP client handles retry automatically)
+                    response = self.http_client.post(
+                        self.FAVE_URL,
+                        data={"deviationid": deviationid, "access_token": access_token},
+                        timeout=30,
+                    )
 
-            try:
-                # Attempt to fave
-                response = requests.post(
-                    self.FAVE_URL,
-                    data={"deviationid": deviationid, "access_token": access_token},
-                    timeout=30,
-                )
-
-                if response.status_code == 200:
-                    # Success
+                    # Success - HTTP client only returns response if successful
                     self.repo.mark_faved(deviationid)
                     with self._stats_lock:
                         self._worker_stats["processed"] += 1
+                        self._worker_stats["consecutive_failures"] = 0  # Reset on success
                     self.logger.info("Faved: %s", deviationid)
 
-                    # Random delay to avoid rate limiting
-                    time.sleep(random.uniform(2, 10))
+                    # Random delay with stop_flag check (interruptible sleep)
+                    delay = random.uniform(2, 10)
+                    if self._stop_flag.wait(timeout=delay):
+                        # Stop flag was set during wait
+                        self.logger.info("Worker stop requested during delay")
+                        break
 
-                elif response.status_code == 429:
-                    # Rate limited - check Retry-After header
-                    retry_after = response.headers.get("Retry-After")
-                    if retry_after:
+                except requests.HTTPError as e:
+                    response = getattr(e, "response", None)
+                    status_code = getattr(response, "status_code", None)
+
+                    # Non-retryable request errors: delete from queue to avoid
+                    # poisoning the worker with permanent failures.
+                    if (
+                        response is not None
+                        and isinstance(status_code, int)
+                        and 400 <= status_code < 500
+                        and status_code != 429
+                    ):
+                        error_payload: object | None
                         try:
-                            delay = int(retry_after)
-                            delay = min(delay, 60)  # Cap at 60 seconds
-                        except ValueError:
-                            delay = 5
-                    else:
-                        delay = 5
+                            error_payload = response.json()
+                        except Exception:  # noqa: BLE001
+                            error_payload = None
 
-                    self.repo.bump_attempt(deviationid, f"429 rate limited, retry after {delay}s")
-                    self.logger.warning(
-                        "Rate limited for %s, backing off for %s seconds", deviationid, delay
+                        error_desc = None
+                        error_code = None
+                        error_name = None
+                        if isinstance(error_payload, dict):
+                            error_desc = error_payload.get("error_description")
+                            error_code = error_payload.get("error_code")
+                            error_name = error_payload.get("error")
+
+                        error_parts = [f"HTTP {status_code}"]
+                        if error_name:
+                            error_parts.append(str(error_name))
+                        if error_code is not None:
+                            error_parts.append(f"code={error_code}")
+                        if error_desc:
+                            error_parts.append(str(error_desc))
+                        error_msg = ": ".join([error_parts[0], " ".join(error_parts[1:])])
+
+                        # Special case: DA rate limit for faving returns HTTP 400
+                        # invalid_request with error_code=4. This is retryable, but
+                        # we must stop the worker to avoid hammering the API.
+                        if status_code == 400 and error_code in (4, "4"):
+                            self.repo.bump_attempt(deviationid, error_msg)
+                            with self._stats_lock:
+                                self._worker_stats["errors"] += 1
+                                self._worker_stats["last_error"] = error_msg
+                                self._worker_stats["consecutive_failures"] = 0
+
+                            self.logger.warning(
+                                "Rate limit detected, leaving deviation pending and stopping worker: %s (%s)",
+                                deviationid,
+                                error_msg,
+                            )
+                            break
+
+                        self.repo.delete_deviation(deviationid)
+                        with self._stats_lock:
+                            self._worker_stats["errors"] += 1
+                            self._worker_stats["last_error"] = error_msg
+                            self._worker_stats["consecutive_failures"] = 0
+
+                        self.logger.warning(
+                            "Skipping and deleting deviation %s: %s",
+                            deviationid,
+                            error_msg,
+                        )
+                        continue
+
+                    raise
+
+                except requests.RequestException as e:
+                    # HTTP client already retried - this is final failure
+                    error_msg = f"Request failed after retries: {str(e)}"
+                    self.repo.mark_failed(deviationid, error_msg)
+                    with self._stats_lock:
+                        self._worker_stats["errors"] += 1
+                        self._worker_stats["consecutive_failures"] += 1
+                        self._worker_stats["last_error"] = error_msg
+                        consecutive_failures = self._worker_stats["consecutive_failures"]
+
+                    self.logger.error(
+                        "Failed to fave %s: %s (consecutive failures: %d/%d)",
+                        deviationid,
+                        str(e),
+                        consecutive_failures,
+                        self.MAX_CONSECUTIVE_FAILURES,
                     )
-                    time.sleep(delay)
 
-                else:
-                    # Other error - mark failed
-                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                    # Stop worker if too many consecutive failures
+                    if consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
+                        self.logger.critical(
+                            "Worker stopped: %d consecutive failures reached (limit: %d)",
+                            consecutive_failures,
+                            self.MAX_CONSECUTIVE_FAILURES,
+                        )
+                        break
+
+                    # Wait with stop_flag check (interruptible sleep)
+                    if self._stop_flag.wait(timeout=2):
+                        self.logger.info("Worker stop requested during error delay")
+                        break
+
+                except Exception as e:
+                    # Unexpected error - mark failed and continue
+                    error_msg = f"Unexpected error: {str(e)}"
                     self.repo.mark_failed(deviationid, error_msg)
                     with self._stats_lock:
                         self._worker_stats["errors"] += 1
                         self._worker_stats["last_error"] = error_msg
-                    self.logger.error("Failed to fave %s: %s", deviationid, error_msg)
-                    time.sleep(2)
-
-            except requests.RequestException as e:
-                # Network error - bump attempt and retry
-                error_msg = f"Network error: {str(e)}"
-                self.repo.bump_attempt(deviationid, error_msg)
-                with self._stats_lock:
-                    self._worker_stats["errors"] += 1
-                    self._worker_stats["last_error"] = error_msg
-                self.logger.error("Network error for %s: %s", deviationid, e)
-                time.sleep(5)
-
-            except Exception as e:
-                # Unexpected error - mark failed and continue
-                error_msg = f"Unexpected error: {str(e)}"
-                self.repo.mark_failed(deviationid, error_msg)
-                with self._stats_lock:
-                    self._worker_stats["errors"] += 1
-                    self._worker_stats["last_error"] = error_msg
-                self.logger.exception("Unexpected error for %s", deviationid)
-                time.sleep(2)
-
-        self.logger.info("Worker loop stopped")
+                    self.logger.exception("Unexpected error for %s", deviationid)
+                    # Wait with stop_flag check (interruptible sleep)
+                    if self._stop_flag.wait(timeout=2):
+                        self.logger.info("Worker stop requested after unexpected error")
+                        break
+        finally:
+            self._worker_running = False
+            self.logger.info("Worker loop stopped")

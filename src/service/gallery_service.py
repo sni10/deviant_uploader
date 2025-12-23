@@ -14,6 +14,7 @@ from logging import Logger
 
 from ..domain.models import Gallery
 from ..storage import GalleryRepository
+from .http_client import DeviantArtHttpClient
 
 
 class GalleryService:
@@ -28,16 +29,23 @@ class GalleryService:
     
     BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
     
-    def __init__(self, gallery_repository: GalleryRepository, logger: Logger):
+    def __init__(
+        self,
+        gallery_repository: GalleryRepository,
+        logger: Logger,
+        http_client: Optional[DeviantArtHttpClient] = None,
+    ):
         """
         Initialize gallery service.
         
         Args:
             gallery_repository: Gallery repository for database operations
             logger: Logger instance
+            http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.gallery_repository = gallery_repository
         self.logger = logger
+        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
     
     def fetch_galleries(
         self, 
@@ -83,8 +91,7 @@ class GalleryService:
             params["offset"] = offset
             
             try:
-                response = requests.get(url, params=params)
-                response.raise_for_status()
+                response = self.http_client.get(url, params=params)
                 data = response.json()
                 
                 if "results" in data:
@@ -96,8 +103,13 @@ class GalleryService:
                 
                 if has_more and next_offset is not None:
                     offset = next_offset
-                    # Rate limiting: wait 3 seconds before next pagination request
-                    time.sleep(3)
+                    # Rate limiting: use recommended delay from HTTP client
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before next galleries page request",
+                        delay,
+                    )
+                    time.sleep(delay)
                 else:
                     has_more = False
                     

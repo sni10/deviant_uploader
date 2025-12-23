@@ -1,6 +1,6 @@
 """Repository for profile message send logs using SQLAlchemy Core."""
 
-from sqlalchemy import select, insert, func
+from sqlalchemy import select, insert, delete, func
 from .base_repository import BaseRepository
 from .profile_message_tables import profile_message_logs
 from ..domain.models import ProfileMessageLog, MessageLogStatus
@@ -14,11 +14,13 @@ class ProfileMessageLogRepository(BaseRepository):
 
         Handles both SQLAlchemy connections and raw SQLite connections.
         """
-        if hasattr(self.conn, '_session'):
-            return self.conn._session.execute(statement)
-        else:
-            compiled = statement.compile(compile_kwargs={"literal_binds": True})
-            return self.conn.execute(str(compiled))
+        if hasattr(self.conn, "_session"):
+            # Use the DBConnection wrapper to ensure thread-safety and
+            # automatic rollback on DBAPI/SQLAlchemy errors.
+            return self.conn.execute(statement)
+
+        compiled = statement.compile(compile_kwargs={"literal_binds": True})
+        return self.conn.execute(str(compiled))
 
     def _scalar(self, statement) -> int | str | None:
         """Execute statement and return first column of the first row."""
@@ -201,3 +203,84 @@ class ProfileMessageLogRepository(BaseRepository):
             profile_message_logs.c.message_id == message_id
         )
         return self._scalar(stmt) or 0
+
+    def get_failed_logs(self, limit: int = 1000, offset: int = 0) -> list[ProfileMessageLog]:
+        """Get all failed message logs.
+
+        Args:
+            limit: Max results to return
+            offset: Offset for pagination
+
+        Returns:
+            List of ProfileMessageLog objects with status=FAILED
+        """
+        stmt = (
+            select(
+                profile_message_logs.c.log_id,
+                profile_message_logs.c.message_id,
+                profile_message_logs.c.recipient_username,
+                profile_message_logs.c.recipient_userid,
+                profile_message_logs.c.commentid,
+                profile_message_logs.c.status,
+                profile_message_logs.c.error_message,
+                profile_message_logs.c.sent_at,
+            )
+            .where(profile_message_logs.c.status == MessageLogStatus.FAILED.value)
+            .order_by(profile_message_logs.c.sent_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+
+        result = self._execute_core(stmt)
+        rows = result.fetchall()
+
+        return [
+            ProfileMessageLog(
+                log_id=row[0],
+                message_id=row[1],
+                recipient_username=row[2],
+                recipient_userid=row[3],
+                commentid=row[4],
+                status=MessageLogStatus(row[5]),
+                error_message=row[6],
+                sent_at=row[7],
+            )
+            for row in rows
+        ]
+
+    def delete_failed_logs(self, failed_logs: list[ProfileMessageLog]) -> int:
+        """Delete failed log entries.
+
+        Args:
+            failed_logs: List of ProfileMessageLog objects to delete
+
+        Returns:
+            Number of deleted records
+        """
+        if not failed_logs:
+            return 0
+
+        log_ids = [log.log_id for log in failed_logs]
+        
+        stmt = delete(profile_message_logs).where(
+            profile_message_logs.c.log_id.in_(log_ids)
+        )
+        
+        result = self._execute_core(stmt)
+        self.conn.commit()
+        
+        deleted_count = result.rowcount
+        return deleted_count
+
+    def get_all_recipient_userids(self) -> set[str]:
+        """Get all unique recipient_userid values from logs.
+
+        Returns:
+            Set of recipient_userid strings (both sent and failed)
+        """
+        stmt = select(profile_message_logs.c.recipient_userid).distinct()
+        
+        result = self._execute_core(stmt)
+        rows = result.fetchall()
+        
+        return {row[0] for row in rows if row[0]}

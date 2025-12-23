@@ -1,8 +1,13 @@
 """Repository for extended deviation metadata."""
+
 import json
 from typing import Optional
 
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from .base_repository import BaseRepository
+from .models import DeviationMetadata
 
 
 class DeviationMetadataRepository(BaseRepository):
@@ -88,87 +93,61 @@ class DeviationMetadataRepository(BaseRepository):
                 return None
             return json.dumps(value, ensure_ascii=False)
 
-        cursor = self.conn.execute(
-            """
-            INSERT INTO deviation_metadata (
-                deviationid, title, description, license, allows_comments, tags, 
-                is_favourited, is_watching, is_mature, mature_level, 
-                mature_classification, printid, author, creation_time, category,
-                file_size, resolution, submitted_with, stats_json, camera, 
-                collections, galleries, can_post_comment,
-                stats_views_today, stats_downloads_today, stats_downloads, 
-                stats_views, stats_favourites, stats_comments,
-                created_at, updated_at
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-            )
-            ON CONFLICT(deviationid) DO UPDATE SET
-                title=excluded.title,
-                description=excluded.description,
-                license=excluded.license,
-                allows_comments=excluded.allows_comments,
-                tags=excluded.tags,
-                is_favourited=excluded.is_favourited,
-                is_watching=excluded.is_watching,
-                is_mature=excluded.is_mature,
-                mature_level=excluded.mature_level,
-                mature_classification=excluded.mature_classification,
-                printid=excluded.printid,
-                author=excluded.author,
-                creation_time=excluded.creation_time,
-                category=excluded.category,
-                file_size=excluded.file_size,
-                resolution=excluded.resolution,
-                submitted_with=excluded.submitted_with,
-                stats_json=excluded.stats_json,
-                camera=excluded.camera,
-                collections=excluded.collections,
-                galleries=excluded.galleries,
-                can_post_comment=excluded.can_post_comment,
-                stats_views_today=excluded.stats_views_today,
-                stats_downloads_today=excluded.stats_downloads_today,
-                stats_downloads=excluded.stats_downloads,
-                stats_views=excluded.stats_views,
-                stats_favourites=excluded.stats_favourites,
-                stats_comments=excluded.stats_comments,
-                updated_at=CURRENT_TIMESTAMP
-            """,
-            (
-                deviationid,
-                title,
-                description,
-                license,
-                1 if allows_comments else 0 if allows_comments is not None else None,
-                dumps(tags),
-                1 if is_favourited else 0 if is_favourited is not None else None,
-                1 if is_watching else 0 if is_watching is not None else None,
-                1 if is_mature else 0 if is_mature is not None else None,
-                mature_level,
-                dumps(mature_classification),
-                printid,
-                dumps(author),
-                creation_time,
-                category,
-                file_size,
-                resolution,
-                dumps(submitted_with),
-                dumps(stats_json),
-                dumps(camera),
-                dumps(collections),
-                dumps(galleries),
-                1 if can_post_comment else 0 if can_post_comment is not None else None,
-                stats_views_today,
-                stats_downloads_today,
-                stats_downloads,
-                stats_views,
-                stats_favourites,
-                stats_comments,
+        table = DeviationMetadata.__table__
+
+        values = {
+            "deviationid": deviationid,
+            "title": title,
+            "description": description,
+            "license": license,
+            "allows_comments": (
+                1 if allows_comments else 0 if allows_comments is not None else None
             ),
+            "tags": dumps(tags),
+            "is_favourited": (
+                1 if is_favourited else 0 if is_favourited is not None else None
+            ),
+            "is_watching": (
+                1 if is_watching else 0 if is_watching is not None else None
+            ),
+            "is_mature": 1 if is_mature else 0 if is_mature is not None else None,
+            "mature_level": mature_level,
+            "mature_classification": dumps(mature_classification),
+            "printid": printid,
+            "author": dumps(author),
+            "creation_time": creation_time,
+            "category": category,
+            "file_size": file_size,
+            "resolution": resolution,
+            "submitted_with": dumps(submitted_with),
+            "stats_json": dumps(stats_json),
+            "camera": dumps(camera),
+            "collections": dumps(collections),
+            "galleries": dumps(galleries),
+            "can_post_comment": (
+                1 if can_post_comment else 0 if can_post_comment is not None else None
+            ),
+            "stats_views_today": stats_views_today,
+            "stats_downloads_today": stats_downloads_today,
+            "stats_downloads": stats_downloads,
+            "stats_views": stats_views,
+            "stats_favourites": stats_favourites,
+            "stats_comments": stats_comments,
+        }
+
+        stmt = (
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[table.c.deviationid],
+                set_=values,
+            )
+            .returning(table.c.id)
         )
+
+        row_id = self._execute(stmt).scalar_one()
         self.conn.commit()
-        return cursor.lastrowid
+        return int(row_id)
 
     def get_metadata(self, deviationid: str) -> Optional[dict]:
         """Retrieve metadata by deviation ID.
@@ -179,28 +158,13 @@ class DeviationMetadataRepository(BaseRepository):
         Returns:
             Dictionary with all metadata fields or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT 
-                id, deviationid, title, description, license, allows_comments, 
-                tags, is_favourited, is_watching, is_mature, mature_level, 
-                mature_classification, printid, author, creation_time, category,
-                file_size, resolution, submitted_with, stats_json, camera, 
-                collections, galleries, can_post_comment,
-                stats_views_today, stats_downloads_today, stats_downloads, 
-                stats_views, stats_favourites, stats_comments,
-                created_at, updated_at
-            FROM deviation_metadata
-            WHERE deviationid = ?
-            """,
-            (deviationid,),
-        )
-        row = cursor.fetchone()
-        if not row:
+        table = DeviationMetadata.__table__
+        stmt = select(table).where(table.c.deviationid == deviationid)
+        result = self._execute(stmt).mappings().first()
+        if result is None:
             return None
-        
-        columns = [desc[0] for desc in cursor.description]
-        result = dict(zip(columns, row))
+
+        result = dict(result)
         
         # Deserialize JSON fields
         def loads(value: Optional[str]):

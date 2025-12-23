@@ -14,11 +14,13 @@ class ProfileMessageRepository(BaseRepository):
 
         Handles both SQLAlchemy connections and raw SQLite connections.
         """
-        if hasattr(self.conn, '_session'):
-            return self.conn._session.execute(statement)
-        else:
-            compiled = statement.compile(compile_kwargs={"literal_binds": True})
-            return self.conn.execute(str(compiled))
+        if hasattr(self.conn, "_session"):
+            # Use the DBConnection wrapper to ensure thread-safety and
+            # automatic rollback on DBAPI/SQLAlchemy errors.
+            return self.conn.execute(statement)
+
+        compiled = statement.compile(compile_kwargs={"literal_binds": True})
+        return self.conn.execute(str(compiled))
 
     def _scalar(self, statement) -> int | str | None:
         """Execute statement and return first column of the first row."""
@@ -99,6 +101,38 @@ class ProfileMessageRepository(BaseRepository):
             profile_messages.c.is_active,
             profile_messages.c.created_at,
             profile_messages.c.updated_at,
+        ).order_by(profile_messages.c.created_at.desc())
+
+        result = self._execute_core(stmt)
+        rows = result.fetchall()
+
+        return [
+            ProfileMessage(
+                message_id=row[0],
+                title=row[1],
+                body=row[2],
+                is_active=bool(row[3]),
+                created_at=row[4],
+                updated_at=row[5],
+            )
+            for row in rows
+        ]
+
+    def get_active_messages(self) -> list[ProfileMessage]:
+        """Get only active message templates.
+
+        Returns:
+            List of active ProfileMessage objects
+        """
+        stmt = select(
+            profile_messages.c.message_id,
+            profile_messages.c.title,
+            profile_messages.c.body,
+            profile_messages.c.is_active,
+            profile_messages.c.created_at,
+            profile_messages.c.updated_at,
+        ).where(
+            profile_messages.c.is_active == True
         ).order_by(profile_messages.c.created_at.desc())
 
         result = self._execute_core(stmt)

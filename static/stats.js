@@ -64,87 +64,120 @@
     }
   }
 
-  async function syncStats() {
-    const username = document.getElementById("user-select").value;
+  function renderGalleries() {
+    const container = document.getElementById("galleries-list");
     const galleries = optionsCache.galleries || [];
 
     if (galleries.length === 0) {
-      setStatus("No galleries available to sync", "error");
+      container.innerHTML = '<p class="text-muted small">No galleries available</p>';
       return;
     }
 
-    setStatus(`Syncing ${galleries.length} galleries...`);
+    container.innerHTML = galleries
+      .map(
+        (g) => `
+        <div class="col-md-4 col-lg-3">
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="gallery-${g.folderid}"
+              ${g.sync_enabled ? 'checked' : ''}
+              onchange="toggleGallerySync('${g.folderid}', this.checked)"
+            >
+            <label class="form-check-label small" for="gallery-${g.folderid}">
+              ${g.name || 'Unnamed'} ${g.size ? `(${g.size})` : ''}
+            </label>
+          </div>
+        </div>
+      `
+      )
+      .join("");
+  }
 
-    let syncedCount = 0;
-    let errorCount = 0;
-    let lastUserStats = null;
+  async function toggleGallerySync(folderid, syncEnabled) {
+    try {
+      const resp = await fetch(`/api/galleries/${folderid}/sync`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_enabled: syncEnabled }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error || "Failed to update gallery");
+
+      // Update cache
+      const gallery = optionsCache.galleries.find((g) => g.folderid === folderid);
+      if (gallery) {
+        gallery.sync_enabled = syncEnabled;
+      }
+
+      setStatus(
+        `Gallery sync ${syncEnabled ? 'enabled' : 'disabled'}`,
+        "success"
+      );
+    } catch (e) {
+      setStatus("Error updating gallery: " + e.message, "error");
+      // Reload to restore state
+      await loadOptions();
+    }
+  }
+
+  async function selectAllGalleries() {
+    const galleries = optionsCache.galleries || [];
+    if (galleries.length === 0) return;
+
+    setStatus(`Selecting all ${galleries.length} galleries...`);
 
     try {
-      for (let i = 0; i < galleries.length; i++) {
-        const gallery = galleries[i];
-        const folderid = gallery.folderid;
-
-        setStatus(`Syncing gallery ${i + 1}/${galleries.length}: ${gallery.name}...`);
-
-        try {
-          const resp = await fetch("/api/stats/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              folderid,
-              username: username || undefined,
-            }),
-          });
-          const json = await resp.json();
-
-          if (!json.success) {
-            throw new Error(json.error || "Unknown error");
+      // Update all galleries in parallel
+      await Promise.all(
+        galleries.map(async (g) => {
+          if (!g.sync_enabled) {
+            await fetch(`/api/galleries/${g.folderid}/sync`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sync_enabled: true }),
+            });
+            g.sync_enabled = true;
           }
+        })
+      );
 
-          syncedCount++;
-
-          // Update user stats from last successful sync
-          if (json.data.user_stats) {
-            lastUserStats = json.data.user_stats;
-          }
-
-        } catch (e) {
-          console.error(`Failed to sync gallery ${gallery.name}:`, e);
-          errorCount++;
-        }
-
-        // Wait 3 seconds before next gallery (except for last one)
-        if (i < galleries.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-      }
-
-      // Update user header with last stats
-      if (lastUserStats && lastUserStats.username) {
-        const headerEl = document.getElementById("user-header");
-        const watchers = lastUserStats.watchers ?? 0;
-        const watchersDiff = lastUserStats.watchers_diff ?? 0;
-        const profileUrl =
-          lastUserStats.profile_url || `https://www.deviantart.com/${lastUserStats.username}`;
-
-        let diffHtml = "";
-        if (watchersDiff > 0) {
-          diffHtml = ` <span class="positive">(+${watchersDiff})</span>`;
-        } else if (watchersDiff < 0) {
-          diffHtml = ` <span class="negative">(${watchersDiff})</span>`;
-        }
-
-        headerEl.innerHTML = `&mdash; <a href="${profileUrl}" target="_blank" rel="noopener">watchers: ${watchers}</a>${diffHtml}`;
-      }
-
-      const statusMsg = errorCount > 0
-        ? `Synced ${syncedCount}/${galleries.length} galleries (${errorCount} failed)`
-        : `Successfully synced all ${syncedCount} galleries`;
-      setStatus(statusMsg, errorCount > 0 ? "error" : "success");
-
-      await loadStats();
+      renderGalleries();
+      setStatus(`Selected all ${galleries.length} galleries`, "success");
     } catch (e) {
-      setStatus("Error: " + e.message, "error");
+      setStatus("Error selecting all galleries: " + e.message, "error");
+      await loadOptions();
+    }
+  }
+
+  async function deselectAllGalleries() {
+    const galleries = optionsCache.galleries || [];
+    if (galleries.length === 0) return;
+
+    setStatus(`Deselecting all ${galleries.length} galleries...`);
+
+    try {
+      // Update all galleries in parallel
+      await Promise.all(
+        galleries.map(async (g) => {
+          if (g.sync_enabled) {
+            await fetch(`/api/galleries/${g.folderid}/sync`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sync_enabled: false }),
+            });
+            g.sync_enabled = false;
+          }
+        })
+      );
+
+      renderGalleries();
+      setStatus(`Deselected all ${galleries.length} galleries`, "success");
+    } catch (e) {
+      setStatus("Error deselecting all galleries: " + e.message, "error");
+      await loadOptions();
     }
   }
 
@@ -160,6 +193,8 @@
         value: u.username,
         label: `${u.username}`,
       }));
+
+      renderGalleries();
 
       setStatus("Options loaded", "success");
     } catch (e) {
@@ -312,14 +347,133 @@
     }
   }
 
+  // ========== Worker Functions ==========
+
+  let workerPollInterval = null;
+
+  async function startWorker() {
+    const username = document.getElementById("user-select").value;
+    setStatus("Starting worker...");
+
+    try {
+      const resp = await fetch("/api/stats/worker/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username || undefined }),
+      });
+      const json = await resp.json();
+
+      if (json.success) {
+        setStatus("Worker started", "success");
+        updateWorkerUI(true);
+        startWorkerPolling();
+      } else {
+        setStatus("Failed to start worker: " + (json.message || json.error), "error");
+      }
+    } catch (e) {
+      setStatus("Error starting worker: " + e.message, "error");
+    }
+  }
+
+  async function stopWorker() {
+    setStatus("Stopping worker...");
+
+    try {
+      const resp = await fetch("/api/stats/worker/stop", {
+        method: "POST",
+      });
+      const json = await resp.json();
+
+      if (json.success) {
+        setStatus("Worker stopped", "success");
+        stopWorkerPolling();
+        updateWorkerUI(false);
+      } else {
+        setStatus("Failed to stop worker: " + (json.message || json.error), "error");
+      }
+    } catch (e) {
+      setStatus("Error stopping worker: " + e.message, "error");
+    }
+  }
+
+  async function fetchWorkerStatus() {
+    try {
+      const resp = await fetch("/api/stats/worker/status");
+      const json = await resp.json();
+
+      if (json.success && json.data) {
+        const data = json.data;
+        updateWorkerUI(data.running, data);
+
+        if (!data.running && workerPollInterval) {
+          // Worker finished, stop polling and refresh stats
+          stopWorkerPolling();
+          await loadStats();
+          setStatus("Worker completed", "success");
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch worker status", e);
+    }
+  }
+
+  function updateWorkerUI(running, data = null) {
+    const startBtn = document.getElementById("btn-start-worker");
+    const stopBtn = document.getElementById("btn-stop-worker");
+
+    if (running) {
+      if (startBtn) startBtn.disabled = true;
+      if (stopBtn) stopBtn.disabled = false;
+
+      if (data) {
+        let statusMsg = `Worker running: ${data.processed_galleries} galleries, ${data.processed_deviations} deviations`;
+        if (data.current_gallery) {
+          statusMsg += ` | Current: ${data.current_gallery}`;
+        }
+        if (data.errors > 0) {
+          statusMsg += ` | Errors: ${data.errors}`;
+        }
+        setStatus(statusMsg);
+      } else {
+        setStatus("Worker running...");
+      }
+    } else {
+      if (startBtn) startBtn.disabled = false;
+      if (stopBtn) stopBtn.disabled = true;
+    }
+  }
+
+  function startWorkerPolling() {
+    if (workerPollInterval) {
+      clearInterval(workerPollInterval);
+    }
+    // Poll every 2 seconds
+    workerPollInterval = setInterval(fetchWorkerStatus, 2000);
+    // Fetch immediately
+    fetchWorkerStatus();
+  }
+
+  function stopWorkerPolling() {
+    if (workerPollInterval) {
+      clearInterval(workerPollInterval);
+      workerPollInterval = null;
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
     await loadOptions();
     await loadStats();
+    // Check initial worker status
+    await fetchWorkerStatus();
   });
 
   // Expose for inline handlers
-  window.syncStats = syncStats;
   window.loadStats = loadStats;
   window.combinedSort = combinedSort;
   window.sortBy = sortBy;
+  window.toggleGallerySync = toggleGallerySync;
+  window.selectAllGalleries = selectAllGalleries;
+  window.deselectAllGalleries = deselectAllGalleries;
+  window.startWorker = startWorker;
+  window.stopWorker = stopWorker;
 })();

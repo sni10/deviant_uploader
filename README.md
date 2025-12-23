@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](https://github.com/sni10/deviant_uploader/blob/main/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/sni10/deviant_uploader?style=for-the-badge&logo=github)](https://github.com/sni10/deviant_uploader/releases/latest)
-[![Tests](https://img.shields.io/badge/tests-66%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-155%20passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-47%25-brightgreen?style=for-the-badge&logo=codecov&logoColor=white)](https://github.com/sni10/deviant_uploader/actions/workflows/ci.yml)
 
 Web app for managing DeviantArt content: batch uploads, statistics, charts.
@@ -47,6 +47,12 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 - Full send log with profile links and comment IDs
 - Retry-After header compliance
 
+### 💬 Auto Comment
+- Auto-comment workflow from watch/global feeds
+- Comment template library with activation toggle
+- Queue-based worker with rate limiting
+- Logs for sent/failed comments
+
 ### Technical Features
 - OAuth2 authentication with auto-refresh
 - SQLite and PostgreSQL support (SQLite default)
@@ -56,11 +62,15 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 - REST API for all operations
 
 
-## _Screenshots_
+## _SCREENSHOTS_
 
 - Statistics
 - Charts
 - Bulk Loader
+- Mass faves
+- Profile broadcast comment
+- Auto comment deviations
+
 
 ---------
 
@@ -72,7 +82,7 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 ![DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png](doc/img/DeviantArt-Upload-Admin-12-09-2025_09_54_AM.png)
 ![Screenshot 2025-12-17 060642.png](doc/img/Screenshot%202025-12-17%20060642.png)
 ![Profile-Broadcasting-DeviantArt-Dashboard-12-17-2025_07_19_AM.png](doc/img/Profile-Broadcasting-DeviantArt-Dashboard-12-17-2025_07_19_AM.png)
-
+![Auto-Comment-DeviantArt-Dashboard-12-23-2025_10_06_PM.png](doc/img/Auto-Comment-DeviantArt-Dashboard-12-23-2025_10_06_PM.png)
 </details>
 
 ---------
@@ -167,6 +177,16 @@ Upload management.
 3. Create or select preset with settings
 4. Apply preset to selected files
 5. Click "Upload Selected" to upload and publish
+
+### Auto Comment (`http://localhost:5000/auto_comment.html`)
+
+Automated commenting on deviations from feeds.
+
+**Key Functions:**
+- Manage comment templates (create/update/activate)
+- Collect deviations from watch/global feeds
+- Queue management and worker control
+- Logs for sent/failed comments
 
 ## Configuration
 
