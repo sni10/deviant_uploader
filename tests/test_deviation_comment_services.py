@@ -87,7 +87,9 @@ def test_comment_poster_worker_success_logs_and_marks() -> None:
         logger=logger,
         http_client=http_client,
     )
-    service._stop_flag.wait = MagicMock(return_value=True)
+    # First call (broadcast_delay): return False to continue
+    # Second call (after success): return True to stop
+    service._stop_flag.wait = MagicMock(side_effect=[False, True])
 
     service._worker_loop(access_token="token", template_id=None)
 
@@ -129,7 +131,9 @@ def test_comment_poster_non_retryable_http_error_marks_failed() -> None:
         logger=logger,
         http_client=http_client,
     )
-    service._stop_flag.wait = MagicMock(return_value=True)
+    # First call (broadcast_delay): return False to continue
+    # Second call (after failure): return True to stop
+    service._stop_flag.wait = MagicMock(side_effect=[False, True])
 
     service._worker_loop(access_token="token", template_id=None)
 

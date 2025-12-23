@@ -113,3 +113,14 @@ class OAuthTokenRepository(BaseRepository):
         
         # Consider token expired if it expires in the next 5 minutes
         return datetime.now() + timedelta(minutes=5) >= token["expires_at"]
+    
+    def delete_token(self) -> None:
+        """
+        Delete all OAuth tokens from database.
+        
+        This is used when a token is detected as expired or invalid
+        by the API, allowing the system to re-authenticate automatically.
+        """
+        table = OAuthTokenModel.__table__
+        self._execute(delete(table))
+        self.conn.commit()

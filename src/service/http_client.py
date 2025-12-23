@@ -2,9 +2,12 @@
 
 import time
 from logging import Logger
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import requests
+
+if TYPE_CHECKING:
+    from ..storage.oauth_token_repository import OAuthTokenRepository
 
 
 class DeviantArtHttpClient:
@@ -30,15 +33,22 @@ class DeviantArtHttpClient:
     # Default delay between requests to avoid rate limiting
     DEFAULT_REQUEST_DELAY = 5  # seconds
 
-    def __init__(self, logger: Logger, enable_retry: bool = True) -> None:
+    def __init__(
+        self,
+        logger: Logger,
+        enable_retry: bool = True,
+        token_repo: Optional["OAuthTokenRepository"] = None,
+    ) -> None:
         """Initialize HTTP client.
         
         Args:
             logger: Logger instance for request/error logging
             enable_retry: Enable automatic retry logic (default: True)
+            token_repo: Optional OAuth token repository for automatic token cleanup
         """
         self.logger = logger
         self.enable_retry = enable_retry
+        self.token_repo = token_repo
         # Track last retry delay from rate limiting for proactive waiting
         self._last_retry_delay: int = 0
 
@@ -89,6 +99,42 @@ class DeviantArtHttpClient:
         try:
             data = response.json()
             if isinstance(data, dict) and data.get("error") == "user_api_threshold":
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+
+        return False
+
+    @staticmethod
+    def _is_expired_token_response(response: requests.Response) -> bool:
+        """Check if response indicates expired OAuth token.
+        
+        DeviantArt API signals expired token via:
+        - HTTP 401 status code
+        - JSON payload with "error": "invalid_token"
+        - error_description containing "Expired oAuth2 user token"
+        
+        Args:
+            response: HTTP response object
+            
+        Returns:
+            True if token is expired, False otherwise
+        """
+        if response.status_code != 401:
+            return False
+
+        try:
+            data = response.json()
+            if not isinstance(data, dict):
+                return False
+            
+            # Check for invalid_token error
+            if data.get("error") != "invalid_token":
+                return False
+            
+            # Check error_description for expired token message
+            error_desc = data.get("error_description", "")
+            if isinstance(error_desc, str) and "expired oauth2 user token" in error_desc.lower():
                 return True
         except Exception:  # noqa: BLE001
             pass
@@ -276,6 +322,22 @@ class DeviantArtHttpClient:
                         or is_rate_limited
                     )
                     if not is_retryable:
+                        # Check for expired token before raising
+                        if self._is_expired_token_response(response):
+                            self.logger.critical(
+                                "EXPIRED TOKEN DETECTED: HTTP 401 invalid_token - "
+                                "Deleting expired token from database to allow re-authentication"
+                            )
+                            if self.token_repo is not None:
+                                try:
+                                    self.token_repo.delete_token()
+                                    self.logger.info("Expired token successfully deleted from database")
+                                except Exception as delete_error:  # noqa: BLE001
+                                    self.logger.error(
+                                        "Failed to delete expired token: %s",
+                                        delete_error,
+                                        exc_info=True,
+                                    )
                         raise
 
                 if not self.enable_retry or retry_count >= self.MAX_RETRIES:
