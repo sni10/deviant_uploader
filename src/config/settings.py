@@ -55,6 +55,10 @@ class Config:
         self.log_dir = self._resolve_path(log_dir_env)
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         
+        # Broadcasting configuration
+        self.broadcast_min_delay_seconds = int(os.getenv('BROADCAST_MIN_DELAY_SECONDS', '60'))
+        self.broadcast_max_delay_seconds = int(os.getenv('BROADCAST_MAX_DELAY_SECONDS', '180'))
+        
         # API endpoints
         self.api_base_url = 'https://www.deviantart.com'
         self.oauth_authorize_url = f'{self.api_base_url}/oauth2/authorize'

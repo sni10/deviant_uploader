@@ -37,6 +37,7 @@ class WatcherRepository(BaseRepository):
                 index_elements=[watchers.c.username],
                 set_={"userid": userid, "fetched_at": func.now()},
             )
+            .inline()
         )
 
         self._execute_core(stmt)

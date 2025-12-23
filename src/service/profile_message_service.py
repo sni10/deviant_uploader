@@ -12,6 +12,7 @@ from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
 from ..storage.watcher_repository import WatcherRepository
 from ..domain.models import MessageLogStatus
+from ..config.settings import get_config
 from .message_randomizer import randomize_template
 from .http_client import DeviantArtHttpClient
 
@@ -36,6 +37,7 @@ class ProfileMessageService:
         self.watcher_repo = watcher_repo
         self.logger = logger
         self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.config = get_config()
 
         # Worker state
         self._worker_thread: Optional[threading.Thread] = None
@@ -282,6 +284,23 @@ class ProfileMessageService:
         )
         
         return selected_message.message_id, randomized_body
+
+    def _get_broadcast_delay(self) -> int:
+        """Generate random delay for broadcasting (in seconds).
+
+        Returns:
+            Random delay in seconds between min and max configured values
+        """
+        min_delay = self.config.broadcast_min_delay_seconds
+        max_delay = self.config.broadcast_max_delay_seconds
+        delay = random.randint(min_delay, max_delay)
+        self.logger.debug(
+            "Generated broadcast delay: %d seconds (range: %d-%d)",
+            delay,
+            min_delay,
+            max_delay,
+        )
+        return delay
 
     def _is_worker_alive(self) -> bool:
         """Return True if the background worker thread is alive."""
@@ -712,6 +731,15 @@ class ProfileMessageService:
                     break
 
                 try:
+                    # Apply broadcast delay before sending
+                    broadcast_delay = self._get_broadcast_delay()
+                    self.logger.info(
+                        "Waiting %d seconds before sending to %s",
+                        broadcast_delay,
+                        username,
+                    )
+                    time.sleep(broadcast_delay)
+
                     # Post comment to profile (HTTP client handles retry automatically)
                     url = self.PROFILE_COMMENT_URL.format(username=username)
                     response = self.http_client.post(
