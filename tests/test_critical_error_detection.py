@@ -8,6 +8,15 @@ from src.service.comment_poster_service import CommentPosterService
 from src.service.profile_message_service import ProfileMessageService
 
 
+@pytest.fixture(autouse=True)
+def mock_config():
+    """Mock get_config() to avoid requiring environment variables in tests."""
+    mock_cfg = Mock()
+    with patch("src.service.comment_poster_service.get_config", return_value=mock_cfg):
+        with patch("src.service.profile_message_service.get_config", return_value=mock_cfg):
+            yield mock_cfg
+
+
 class TestCommentPosterCriticalErrors:
     """Test critical error detection in CommentPosterService."""
 
