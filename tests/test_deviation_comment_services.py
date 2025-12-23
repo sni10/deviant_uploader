@@ -63,6 +63,11 @@ def test_comment_poster_worker_success_logs_and_marks() -> None:
     logger = MagicMock()
     http_client = MagicMock()
 
+    # Mock config to avoid environment variable requirements
+    mock_config = MagicMock()
+    mock_config.broadcast_min_delay_seconds = 60
+    mock_config.broadcast_max_delay_seconds = 180
+
     template = MagicMock()
     template.message_id = 1
     template.body = "Hello"
@@ -86,6 +91,7 @@ def test_comment_poster_worker_success_logs_and_marks() -> None:
         log_repo=log_repo,
         logger=logger,
         http_client=http_client,
+        config=mock_config,
     )
     # First call (broadcast_delay): return False to continue
     # Second call (after success): return True to stop
@@ -104,6 +110,11 @@ def test_comment_poster_non_retryable_http_error_marks_failed() -> None:
     log_repo = MagicMock()
     logger = MagicMock()
     http_client = MagicMock()
+
+    # Mock config to avoid environment variable requirements
+    mock_config = MagicMock()
+    mock_config.broadcast_min_delay_seconds = 60
+    mock_config.broadcast_max_delay_seconds = 180
 
     template = MagicMock()
     template.message_id = 1
@@ -130,6 +141,7 @@ def test_comment_poster_non_retryable_http_error_marks_failed() -> None:
         log_repo=log_repo,
         logger=logger,
         http_client=http_client,
+        config=mock_config,
     )
     # First call (broadcast_delay): return False to continue
     # Second call (after failure): return True to stop

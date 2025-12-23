@@ -42,13 +42,14 @@ class CommentPosterService:
         log_repo: DeviationCommentLogRepository,
         logger: Logger,
         http_client: Optional[DeviantArtHttpClient] = None,
+        config: Optional[object] = None,
     ) -> None:
         self.message_repo = message_repo
         self.queue_repo = queue_repo
         self.log_repo = log_repo
         self.logger = logger
         self.http_client = http_client or DeviantArtHttpClient(logger=logger)
-        self.config = get_config()
+        self._config = config
 
         self._worker_thread: Optional[threading.Thread] = None
         self._worker_running = False
@@ -60,6 +61,13 @@ class CommentPosterService:
             "consecutive_failures": 0,
         }
         self._stats_lock = threading.Lock()
+
+    @property
+    def config(self):
+        """Lazy-load config if not provided during initialization."""
+        if self._config is None:
+            self._config = get_config()
+        return self._config
 
     def _is_worker_alive(self) -> bool:
         """Return True if the background worker thread is alive."""
