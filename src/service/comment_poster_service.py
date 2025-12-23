@@ -32,6 +32,7 @@ class CommentPosterService:
         "https://www.deviantart.com/api/v1/oauth2/comments/post/deviation/"
         "{deviationid}"
     )
+    FAVE_URL = "https://www.deviantart.com/api/v1/oauth2/collections/fave"
     MAX_CONSECUTIVE_FAILURES = 5
     MAX_ATTEMPTS = 3
 
@@ -217,12 +218,45 @@ class CommentPosterService:
         url = self.COMMENT_URL.format(deviationid=deviationid)
         return self.http_client.post(url, data=data, timeout=30)
 
+    def _fave_deviation(
+        self,
+        access_token: str,
+        deviationid: str,
+    ) -> bool:
+        """
+        Fave deviation on DeviantArt.
+
+        Args:
+            access_token: OAuth access token
+            deviationid: Deviation ID to fave
+
+        Returns:
+            True if faved successfully, False otherwise
+        """
+        try:
+            self.http_client.post(
+                self.FAVE_URL,
+                data={"deviationid": deviationid, "access_token": access_token},
+                timeout=30,
+            )
+            self.logger.info("Auto-faved deviation: %s", deviationid)
+            return True
+        except Exception as e:
+            # Ошибки фаворинга не должны ломать комментирование
+            self.logger.warning(
+                "Failed to auto-fave deviation %s: %s",
+                deviationid,
+                str(e),
+            )
+            return False
+
     def _handle_success(
         self,
         queue_item: dict[str, object],
         template: DeviationCommentMessage,
         comment_text: str,
         commentid: str | None,
+        access_token: str,
     ) -> None:
         """Handle success by updating queue and logs."""
         deviationid = str(queue_item.get("deviationid"))
@@ -245,6 +279,9 @@ class CommentPosterService:
         with self._stats_lock:
             self._worker_stats["processed"] += 1
             self._worker_stats["consecutive_failures"] = 0
+
+        # Auto-fave deviation after successful comment
+        self._fave_deviation(access_token, deviationid)
 
     def _format_http_error(self, error: requests.HTTPError) -> str:
         """Format HTTP error with response details when available."""
@@ -416,6 +453,7 @@ class CommentPosterService:
                         template,
                         comment_text,
                         commentid,
+                        access_token,
                     )
 
                     delay = self.http_client.get_recommended_delay()
