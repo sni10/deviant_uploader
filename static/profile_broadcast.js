@@ -578,6 +578,29 @@
     }
   };
 
+  window.retryFailedMessages = async function () {
+    if (!confirm("Retry all failed messages? This will add them back to the queue.")) return;
+
+    setStatus("Adding failed messages to retry queue...");
+
+    try {
+      const resp = await fetch("/api/profile-messages/queue/retry-failed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 100 }),
+      });
+      const json = await resp.json();
+
+      if (!json.success) throw new Error(json.error || json.message);
+
+      setStatus(json.message || `Added ${json.added_count} failed messages to retry queue`, "success");
+      await fetchStatus();
+      await loadWatchersList();
+    } catch (e) {
+      setStatus("Failed to retry messages: " + e.message, "error");
+    }
+  };
+
   window.startWorker = async function () {
     setStatus("Starting broadcast worker...");
 

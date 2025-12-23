@@ -282,3 +282,27 @@ class Watcher:
     # Metadata
     watcher_id: Optional[int] = None
     fetched_at: datetime = field(default_factory=datetime.now)
+
+
+class QueueStatus(str, Enum):
+    """Status of a profile message queue entry."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+
+
+@dataclass
+class ProfileMessageQueue:
+    """Queue entry for profile messages to be sent to watchers."""
+
+    message_id: int  # FK to ProfileMessage
+    recipient_username: str
+    recipient_userid: str
+    status: QueueStatus = QueueStatus.PENDING
+    priority: int = 0  # Higher priority processed first
+
+    # Metadata
+    queue_id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)

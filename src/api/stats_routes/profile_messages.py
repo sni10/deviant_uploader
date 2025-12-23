@@ -315,6 +315,21 @@ def register_profile_message_routes(
             g.logger.error(f"Remove selected watchers failed: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)}), 500
 
+    @app.route("/api/profile-messages/queue/retry-failed", methods=["POST"])
+    def retry_failed_messages():
+        """Retry failed messages by adding them back to queue."""
+        try:
+            data = request.get_json() or {}
+            limit = int(data.get("limit", 100))
+
+            service = get_profile_message_service()
+            result = service.retry_failed_messages(limit=limit)
+
+            return jsonify(result)
+        except Exception as e:  # noqa: BLE001
+            g.logger.error(f"Retry failed messages failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+
     @app.route("/api/profile-messages/logs", methods=["GET"])
     def get_broadcast_logs():
         """Get broadcast logs."""

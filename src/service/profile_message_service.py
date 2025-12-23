@@ -10,8 +10,9 @@ import requests
 
 from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
+from ..storage.profile_message_queue_repository import ProfileMessageQueueRepository
 from ..storage.watcher_repository import WatcherRepository
-from ..domain.models import MessageLogStatus
+from ..domain.models import MessageLogStatus, QueueStatus
 from ..config.settings import get_config
 from .message_randomizer import randomize_template
 from .http_client import DeviantArtHttpClient
@@ -28,12 +29,14 @@ class ProfileMessageService:
         self,
         message_repo: ProfileMessageRepository,
         log_repo: ProfileMessageLogRepository,
+        queue_repo: ProfileMessageQueueRepository,
         watcher_repo: WatcherRepository,
         logger: Logger,
         http_client: Optional[DeviantArtHttpClient] = None,
     ) -> None:
         self.message_repo = message_repo
         self.log_repo = log_repo
+        self.queue_repo = queue_repo
         self.watcher_repo = watcher_repo
         self.logger = logger
         self.http_client = http_client or DeviantArtHttpClient(logger=logger)
@@ -321,10 +324,14 @@ class ProfileMessageService:
         # Reset stale flag if the thread is not alive.
         self._worker_running = False
 
-        # Check if queue has watchers
-        with self._queue_lock:
-            if not self._watchers_queue:
+        # Check if queue has pending entries in DB
+        try:
+            pending_count = self.queue_repo.get_queue_count(status=QueueStatus.PENDING)
+            if pending_count == 0:
                 return {"success": False, "message": "No watchers in queue. Fetch watchers first."}
+        except Exception as e:
+            self.logger.error("Failed to check queue count: %s", e)
+            return {"success": False, "message": f"Failed to check queue: {str(e)}"}
 
         # Check if there are active message templates
         active_messages = self.message_repo.get_active_messages()
@@ -386,8 +393,12 @@ class ProfileMessageService:
             # Keep internal flag in sync for callers that still rely on it.
             self._worker_running = False
 
-        with self._queue_lock:
-            queue_remaining = sum(1 for w in self._watchers_queue if w.get("selected", False))
+        # Count pending entries in DB queue
+        try:
+            queue_remaining = self.queue_repo.get_queue_count(status=QueueStatus.PENDING)
+        except Exception as e:
+            self.logger.error("Failed to get queue count: %s", e)
+            queue_remaining = 0
 
         send_stats = self.log_repo.get_stats()
 
@@ -403,102 +414,116 @@ class ProfileMessageService:
             }
 
     def clear_queue(self) -> dict:
-        """Clear watchers queue.
+        """Clear pending entries from persistent queue.
 
         Returns:
             Status dictionary: {success, cleared_count}
         """
-        with self._queue_lock:
-            cleared = len(self._watchers_queue)
-            self._watchers_queue = []
-
-        self.logger.info("Cleared %s watchers from queue", cleared)
-        return {"success": True, "cleared_count": cleared}
+        try:
+            cleared = self.queue_repo.clear_queue(status=QueueStatus.PENDING)
+            self.logger.info("Cleared %s pending entries from queue", cleared)
+            return {"success": True, "cleared_count": cleared}
+        except Exception as e:
+            error_msg = f"Failed to clear queue: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {"success": False, "cleared_count": 0, "error": error_msg}
 
     def remove_selected_from_queue(self) -> dict:
-        """Remove selected watchers from the in-memory queue.
+        """Remove all pending entries from persistent queue.
+
+        Note: In DB-backed queue, there's no 'selected' concept.
+        This method clears all pending entries.
 
         Returns:
             Status dictionary: {success, removed_count, remaining_count}
         """
-        with self._queue_lock:
-            before_count = len(self._watchers_queue)
-            self._watchers_queue = [
-                w for w in self._watchers_queue if not w.get("selected", False)
-            ]
-            remaining_count = len(self._watchers_queue)
-
-        removed_count = before_count - remaining_count
-        self.logger.info(
-            "Removed %s selected watchers from queue (%s remaining)",
-            removed_count,
-            remaining_count,
-        )
-        return {
-            "success": True,
-            "removed_count": removed_count,
-            "remaining_count": remaining_count,
-        }
+        try:
+            removed_count = self.queue_repo.clear_queue(status=QueueStatus.PENDING)
+            remaining_count = self.queue_repo.get_queue_count(status=QueueStatus.PENDING)
+            
+            self.logger.info(
+                "Removed %s pending entries from queue (%s remaining)",
+                removed_count,
+                remaining_count,
+            )
+            return {
+                "success": True,
+                "removed_count": removed_count,
+                "remaining_count": remaining_count,
+            }
+        except Exception as e:
+            error_msg = f"Failed to remove from queue: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {
+                "success": False,
+                "removed_count": 0,
+                "remaining_count": 0,
+                "error": error_msg,
+            }
 
     def get_watchers_list(self) -> list[dict]:
-        """Get current watchers queue with selection status.
+        """Get current watchers queue from persistent storage.
 
         Returns:
             List of watchers: [{"username": str, "userid": str, "selected": bool}]
+            Note: 'selected' is always True for pending entries (for UI compatibility)
         """
-        with self._queue_lock:
-            return [w.copy() for w in self._watchers_queue]
+        try:
+            pending_entries = self.queue_repo.get_pending(limit=1000)
+            return [
+                {
+                    "username": entry.recipient_username,
+                    "userid": entry.recipient_userid,
+                    "selected": True,  # All pending entries are considered "selected"
+                }
+                for entry in pending_entries
+            ]
+        except Exception as e:
+            self.logger.error("Failed to get watchers list: %s", e, exc_info=True)
+            return []
 
     def update_watcher_selection(self, username: str, selected: bool) -> dict:
-        """Update selection status for specific watcher.
+        """Update selection status for specific watcher (no-op for DB queue).
+
+        Note: In DB-backed queue, all pending entries are considered selected.
+        This method exists for API compatibility but does nothing.
 
         Args:
             username: Watcher username
-            selected: New selection status
+            selected: New selection status (ignored)
 
         Returns:
             Status dictionary: {success, message}
         """
-        with self._queue_lock:
-            found = False
-            for watcher in self._watchers_queue:
-                if watcher.get("username") == username:
-                    watcher["selected"] = selected
-                    found = True
-                    break
-
-        if found:
-            return {"success": True, "message": f"Updated selection for {username}"}
-        else:
-            return {"success": False, "message": f"Watcher {username} not found in queue"}
+        return {"success": True, "message": f"Selection update not needed for DB queue"}
 
     def select_all_watchers(self) -> dict:
-        """Select all watchers in queue.
+        """Select all watchers in queue (no-op for DB queue).
+
+        Note: In DB-backed queue, all pending entries are already considered selected.
 
         Returns:
             Status dictionary: {success, selected_count}
         """
-        with self._queue_lock:
-            for watcher in self._watchers_queue:
-                watcher["selected"] = True
-            count = len(self._watchers_queue)
-
-        self.logger.info("Selected all %s watchers", count)
-        return {"success": True, "selected_count": count}
+        try:
+            count = self.queue_repo.get_queue_count(status=QueueStatus.PENDING)
+            return {"success": True, "selected_count": count}
+        except Exception as e:
+            self.logger.error("Failed to count pending entries: %s", e)
+            return {"success": False, "selected_count": 0}
 
     def deselect_all_watchers(self) -> dict:
-        """Deselect all watchers in queue.
+        """Deselect all watchers in queue (no-op for DB queue).
+
+        Note: In DB-backed queue, deselecting means removing from queue.
+        Use clear_queue() or remove_selected_from_queue() instead.
 
         Returns:
             Status dictionary: {success, deselected_count}
         """
-        with self._queue_lock:
-            for watcher in self._watchers_queue:
-                watcher["selected"] = False
-            count = len(self._watchers_queue)
-
-        self.logger.info("Deselected all %s watchers", count)
-        return {"success": True, "deselected_count": count}
+        # For DB queue, "deselect all" doesn't make sense
+        # Return success with 0 count to indicate no action taken
+        return {"success": True, "deselected_count": 0}
 
     def save_watcher_to_db(self, username: str, userid: str) -> dict:
         """Save single watcher to database.
@@ -591,46 +616,85 @@ class ProfileMessageService:
         return {"success": True, "message": f"Added {username} to queue"}
 
     def add_all_saved_to_queue(self, limit: int = 1000) -> dict:
-        """Add all saved watchers from database to sending queue.
+        """Add all saved watchers from database to persistent queue.
+
+        Filters out watchers who already received messages (sent or failed).
 
         Args:
             limit: Maximum number of watchers to add
 
         Returns:
-            Status dictionary: {success, added_count, skipped_count}
+            Status dictionary: {success, added_count, skipped_count, already_sent_count}
         """
+        # Get first active message as placeholder (worker will select random message anyway)
+        active_messages = self.message_repo.get_active_messages()
+        if not active_messages:
+            return {
+                "success": False,
+                "added_count": 0,
+                "skipped_count": 0,
+                "already_sent_count": 0,
+                "message": "No active message templates found",
+            }
+        
+        message_id = active_messages[0].message_id
+        
+        # Get all recipient_userid who already received messages
+        try:
+            already_sent_userids = self.log_repo.get_all_recipient_userids()
+        except Exception as e:
+            self.logger.error("Failed to get sent userids: %s", e, exc_info=True)
+            already_sent_userids = set()
+        
         saved_watchers = self.watcher_repo.get_all_watchers(limit)
         added_count = 0
         skipped_count = 0
+        already_sent_count = 0
 
-        with self._queue_lock:
-            existing_usernames = {w.get("username") for w in self._watchers_queue}
+        for watcher in saved_watchers:
+            # Skip if already sent (in logs)
+            if watcher.userid in already_sent_userids:
+                already_sent_count += 1
+                self.logger.debug(
+                    "Skipping %s - already in send history",
+                    watcher.username,
+                )
+                continue
 
-            for watcher in saved_watchers:
-                if watcher.username in existing_usernames:
-                    skipped_count += 1
-                    continue
-
-                self._watchers_queue.append({
-                    "username": watcher.username,
-                    "userid": watcher.userid,
-                    "selected": True,
-                })
+            try:
+                # UPSERT: will update if already exists in queue
+                self.queue_repo.add_to_queue(
+                    message_id=message_id,
+                    recipient_username=watcher.username,
+                    recipient_userid=watcher.userid,
+                    priority=0,
+                )
                 added_count += 1
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to add %s to queue: %s",
+                    watcher.username,
+                    e,
+                )
+                skipped_count += 1
 
         self.logger.info(
-            "Added %s saved watchers to queue (%s skipped as duplicates)",
+            "Added %s saved watchers to queue (%s skipped, %s already sent)",
             added_count,
             skipped_count,
+            already_sent_count,
         )
         return {
             "success": True,
             "added_count": added_count,
             "skipped_count": skipped_count,
+            "already_sent_count": already_sent_count,
         }
 
     def add_selected_saved_to_queue(self, watchers: list[dict]) -> dict:
-        """Add selected saved watchers to sending queue.
+        """Add selected saved watchers to persistent queue.
+
+        Filters out watchers who already received messages (sent or failed).
 
         Args:
             watchers: List of watchers to add, each item expects
@@ -638,7 +702,7 @@ class ProfileMessageService:
 
         Returns:
             Status dictionary:
-                {success, added_count, skipped_count, invalid_count}
+                {success, added_count, skipped_count, invalid_count, already_sent_count}
         """
         if not watchers:
             return {
@@ -646,46 +710,75 @@ class ProfileMessageService:
                 "added_count": 0,
                 "skipped_count": 0,
                 "invalid_count": 0,
+                "already_sent_count": 0,
             }
 
+        # Get first active message as placeholder
+        active_messages = self.message_repo.get_active_messages()
+        if not active_messages:
+            return {
+                "success": False,
+                "added_count": 0,
+                "skipped_count": 0,
+                "invalid_count": 0,
+                "already_sent_count": 0,
+                "message": "No active message templates found",
+            }
+        
+        message_id = active_messages[0].message_id
+        
+        # Get all recipient_userid who already received messages
+        try:
+            already_sent_userids = self.log_repo.get_all_recipient_userids()
+        except Exception as e:
+            self.logger.error("Failed to get sent userids: %s", e, exc_info=True)
+            already_sent_userids = set()
+        
         added_count = 0
         skipped_count = 0
         invalid_count = 0
+        already_sent_count = 0
 
-        with self._queue_lock:
-            existing_usernames = {w.get("username") for w in self._watchers_queue}
+        for watcher in watchers:
+            username = (watcher.get("username") or "").strip()
+            userid = (watcher.get("userid") or "").strip()
 
-            # Prevent duplicates within the same request
-            seen_in_request: set[str] = set()
+            if not username or not userid:
+                invalid_count += 1
+                continue
 
-            for watcher in watchers:
-                username = (watcher.get("username") or "").strip()
-                userid = (watcher.get("userid") or "").strip()
-
-                if not username or not userid:
-                    invalid_count += 1
-                    continue
-
-                if username in existing_usernames or username in seen_in_request:
-                    skipped_count += 1
-                    continue
-
-                self._watchers_queue.append(
-                    {
-                        "username": username,
-                        "userid": userid,
-                        "selected": True,
-                    }
+            # Skip if already sent (in logs)
+            if userid in already_sent_userids:
+                already_sent_count += 1
+                self.logger.debug(
+                    "Skipping %s - already in send history",
+                    username,
                 )
-                existing_usernames.add(username)
-                seen_in_request.add(username)
+                continue
+
+            try:
+                # UPSERT: will update if already exists in queue
+                self.queue_repo.add_to_queue(
+                    message_id=message_id,
+                    recipient_username=username,
+                    recipient_userid=userid,
+                    priority=0,
+                )
                 added_count += 1
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to add %s to queue: %s",
+                    username,
+                    e,
+                )
+                skipped_count += 1
 
         self.logger.info(
-            "Added %s selected saved watchers to queue (%s skipped, %s invalid)",
+            "Added %s selected saved watchers to queue (%s skipped, %s invalid, %s already sent)",
             added_count,
             skipped_count,
             invalid_count,
+            already_sent_count,
         )
 
         return {
@@ -693,34 +786,126 @@ class ProfileMessageService:
             "added_count": added_count,
             "skipped_count": skipped_count,
             "invalid_count": invalid_count,
+            "already_sent_count": already_sent_count,
         }
+
+    def retry_failed_messages(self, limit: int = 100) -> dict:
+        """Add failed messages back to queue for retry.
+
+        Retrieves failed message logs and adds them to the persistent queue
+        with higher priority for retry.
+
+        Args:
+            limit: Maximum number of failed messages to retry
+
+        Returns:
+            Status dictionary: {success, added_count, skipped_count, message}
+        """
+        try:
+            # Get failed logs from history
+            failed_logs = self.log_repo.get_failed_logs(limit=limit)
+            
+            if not failed_logs:
+                return {
+                    "success": True,
+                    "added_count": 0,
+                    "skipped_count": 0,
+                    "message": "No failed messages found",
+                }
+
+            added_count = 0
+            skipped_count = 0
+            successfully_added_logs = []
+
+            # Add each failed recipient to queue with high priority
+            for log in failed_logs:
+                try:
+                    # Add to persistent queue with priority=10 (higher than default 0)
+                    self.queue_repo.add_to_queue(
+                        message_id=log.message_id,
+                        recipient_username=log.recipient_username,
+                        recipient_userid=log.recipient_userid,
+                        priority=10,
+                    )
+                    added_count += 1
+                    successfully_added_logs.append(log)
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed to add %s to retry queue: %s",
+                        log.recipient_username,
+                        e,
+                    )
+                    skipped_count += 1
+
+            # Delete failed logs that were successfully added to retry queue
+            deleted_count = 0
+            if successfully_added_logs:
+                try:
+                    deleted_count = self.log_repo.delete_failed_logs(successfully_added_logs)
+                    self.logger.info(
+                        "Deleted %s failed log entries from history",
+                        deleted_count,
+                    )
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed to delete failed logs: %s",
+                        e,
+                    )
+
+            self.logger.info(
+                "Added %s failed messages to retry queue (%s skipped, %s deleted from history)",
+                added_count,
+                skipped_count,
+                deleted_count,
+            )
+
+            return {
+                "success": True,
+                "added_count": added_count,
+                "skipped_count": skipped_count,
+                "deleted_count": deleted_count,
+                "message": f"Added {added_count} failed messages to retry queue",
+            }
+
+        except Exception as e:
+            error_msg = f"Failed to retry messages: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {
+                "success": False,
+                "added_count": 0,
+                "skipped_count": 0,
+                "message": error_msg,
+            }
 
     def _worker_loop(self, access_token: str) -> None:
         """Background worker loop (runs in separate thread)."""
         self.logger.info("Worker loop started with randomized message templates")
         try:
             while not self._stop_flag.is_set():
-                # Get next selected watcher from queue
-                with self._queue_lock:
-                    # Find first selected watcher
-                    selected_watcher = None
-                    for i, w in enumerate(self._watchers_queue):
-                        if w.get("selected", False):
-                            selected_watcher = self._watchers_queue.pop(i)
-                            break
-
-                    if not selected_watcher:
-                        # No more selected watchers, stop worker
-                        self.logger.info("No more selected watchers, stopping worker")
+                # Get next pending entry from DB queue
+                try:
+                    pending_entries = self.queue_repo.get_pending(limit=1)
+                    if not pending_entries:
+                        # No more pending entries, stop worker
+                        self.logger.info("No more pending entries, stopping worker")
                         break
-
-                    watcher = selected_watcher
-
-                username = watcher.get("username")
-                userid = watcher.get("userid")
+                    
+                    queue_entry = pending_entries[0]
+                    username = queue_entry.recipient_username
+                    userid = queue_entry.recipient_userid
+                    queue_id = queue_entry.queue_id
+                    
+                    # Mark as processing
+                    self.queue_repo.mark_processing(queue_id)
+                    
+                except Exception as e:
+                    self.logger.error("Failed to get next queue entry: %s", e, exc_info=True)
+                    break
 
                 if not username or not userid:
-                    self.logger.warning("Invalid watcher data: %s", watcher)
+                    self.logger.warning("Invalid queue entry: username=%s, userid=%s", username, userid)
+                    # Remove invalid entry from queue
+                    self.queue_repo.remove_from_queue(queue_id)
                     continue
 
                 # Get randomized message for this send
@@ -768,6 +953,12 @@ class ProfileMessageService:
                         "Sent comment to %s (commentid=%s)", username, commentid
                     )
 
+                    # Remove from queue after successful send
+                    try:
+                        self.queue_repo.remove_from_queue(queue_id)
+                    except Exception as e:
+                        self.logger.warning("Failed to remove queue entry %s: %s", queue_id, e)
+
                     # Rate limiting: use recommended delay from HTTP client
                     delay = self.http_client.get_recommended_delay()
                     self.logger.debug(
@@ -802,6 +993,12 @@ class ProfileMessageService:
                         self.MAX_CONSECUTIVE_FAILURES,
                     )
 
+                    # Remove from queue after failed send
+                    try:
+                        self.queue_repo.remove_from_queue(queue_id)
+                    except Exception as e:
+                        self.logger.warning("Failed to remove queue entry %s: %s", queue_id, e)
+
                     # Stop worker if too many consecutive failures
                     if consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
                         self.logger.critical(
@@ -835,6 +1032,13 @@ class ProfileMessageService:
                         self._worker_stats["last_error"] = error_msg
 
                     self.logger.exception("Unexpected error for %s", username)
+                    
+                    # Remove from queue after unexpected error
+                    try:
+                        self.queue_repo.remove_from_queue(queue_id)
+                    except Exception as e:
+                        self.logger.warning("Failed to remove queue entry %s: %s", queue_id, e)
+                    
                     delay = self.http_client.get_recommended_delay()
                     self.logger.debug(
                         "Waiting %s seconds before continuing after unexpected error",

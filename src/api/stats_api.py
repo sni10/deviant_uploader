@@ -39,6 +39,7 @@ from ..storage.gallery_repository import GalleryRepository
 from ..storage.oauth_token_repository import OAuthTokenRepository
 from ..storage.preset_repository import PresetRepository
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
+from ..storage.profile_message_queue_repository import ProfileMessageQueueRepository
 from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.deviation_repository import DeviationRepository
 from ..storage.deviation_stats_repository import DeviationStatsRepository
@@ -256,12 +257,14 @@ def get_profile_message_service() -> ProfileMessageService:
         worker_conn1 = get_connection()
         worker_conn2 = get_connection()
         worker_conn3 = get_connection()
+        worker_conn4 = get_connection()
         message_repo = ProfileMessageRepository(worker_conn1)
         log_repo = ProfileMessageLogRepository(worker_conn2)
-        watcher_repo = WatcherRepository(worker_conn3)
+        queue_repo = ProfileMessageQueueRepository(worker_conn3)
+        watcher_repo = WatcherRepository(worker_conn4)
         logger = current_app.config["APP_LOGGER"]
         profile_message_service = ProfileMessageService(
-            message_repo, log_repo, watcher_repo, logger
+            message_repo, log_repo, queue_repo, watcher_repo, logger
         )
         current_app.config["PROFILE_MESSAGE_SERVICE"] = profile_message_service
 
