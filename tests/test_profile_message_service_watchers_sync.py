@@ -14,10 +14,12 @@ class TestProfileMessageServiceWatchersSync:
         message_repo = MagicMock()
         log_repo = MagicMock()
         log_repo.get_stats.return_value = {"sent": 0, "failed": 0}
+        queue_repo = MagicMock()
         logger = MagicMock()
         return ProfileMessageService(
             message_repo=message_repo,
             log_repo=log_repo,
+            queue_repo=queue_repo,
             watcher_repo=watcher_repo,
             logger=logger,
             http_client=http_client,

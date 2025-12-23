@@ -22,6 +22,7 @@ class TestSleepPolicy:
 
         message_repo = MagicMock()
         log_repo = MagicMock()
+        queue_repo = MagicMock()
         watcher_repo = MagicMock()
         logger = MagicMock()
 
@@ -45,6 +46,7 @@ class TestSleepPolicy:
         service = ProfileMessageService(
             message_repo=message_repo,
             log_repo=log_repo,
+            queue_repo=queue_repo,
             watcher_repo=watcher_repo,
             logger=logger,
             http_client=http_client,

@@ -16,86 +16,18 @@ class TestProfileMessageServiceQueue:
         message_repo = MagicMock()
         log_repo = MagicMock()
         log_repo.get_stats.return_value = {"sent": 0, "failed": 0}
+        queue_repo = MagicMock()
         watcher_repo = MagicMock()
         logger = MagicMock()
 
         return ProfileMessageService(
             message_repo=message_repo,
             log_repo=log_repo,
+            queue_repo=queue_repo,
             watcher_repo=watcher_repo,
             logger=logger,
         )
 
-    def test_remove_selected_from_queue_removes_only_selected(self) -> None:
-        """Remove selected should drop only items with selected=True."""
-        service = self._create_service()
-        service._watchers_queue = [
-            {"username": "a", "userid": "1", "selected": True},
-            {"username": "b", "userid": "2", "selected": False},
-            {"username": "c", "userid": "3", "selected": True},
-        ]
-
-        result = service.remove_selected_from_queue()
-
-        assert result["success"] is True
-        assert result["removed_count"] == 2
-        assert result["remaining_count"] == 1
-        assert service.get_watchers_list() == [
-            {"username": "b", "userid": "2", "selected": False}
-        ]
-
-    def test_remove_selected_from_queue_when_none_selected(self) -> None:
-        """Remove selected should be a no-op when nothing is selected."""
-        service = self._create_service()
-        service._watchers_queue = [
-            {"username": "a", "userid": "1", "selected": False},
-            {"username": "b", "userid": "2", "selected": False},
-        ]
-
-        result = service.remove_selected_from_queue()
-
-        assert result["success"] is True
-        assert result["removed_count"] == 0
-        assert result["remaining_count"] == 2
-        assert [w["username"] for w in service.get_watchers_list()] == ["a", "b"]
-
-    def test_add_selected_saved_to_queue_adds_skips_and_invalid(self) -> None:
-        """Bulk add should add new watchers, skip duplicates, count invalid."""
-        service = self._create_service()
-        service._watchers_queue = [
-            {"username": "exists", "userid": "1", "selected": False},
-        ]
-
-        result = service.add_selected_saved_to_queue(
-            [
-                {"username": "exists", "userid": "1"},
-                {"username": "new", "userid": "2"},
-                {"username": "new", "userid": "2"},
-                {"username": "", "userid": "3"},
-            ]
-        )
-
-        assert result["success"] is True
-        assert result["added_count"] == 1
-        assert result["skipped_count"] == 2
-        assert result["invalid_count"] == 1
-
-        queue = service.get_watchers_list()
-        assert [w["username"] for w in queue] == ["exists", "new"]
-        assert queue[1]["selected"] is True
-
-    def test_add_selected_saved_to_queue_empty_is_noop(self) -> None:
-        """Bulk add should return zeros for empty input."""
-        service = self._create_service()
-
-        result = service.add_selected_saved_to_queue([])
-
-        assert result == {
-            "success": True,
-            "added_count": 0,
-            "skipped_count": 0,
-            "invalid_count": 0,
-        }
 
     def test_get_worker_status_running_true_when_thread_alive(self) -> None:
         """Status.running must reflect a living thread even if internal flag is stale."""
@@ -149,7 +81,7 @@ class TestProfileMessageServiceQueue:
         _sleep_mock: MagicMock,
         _uniform_mock: MagicMock,
     ) -> None:
-        """Worker must stop on its own when no selected watchers remain."""
+        """Worker must stop on its own when no pending entries remain in DB queue."""
         # Create mock http_client
         http_client = MagicMock()
         resp = MagicMock()
@@ -161,19 +93,27 @@ class TestProfileMessageServiceQueue:
         message_repo = MagicMock()
         log_repo = MagicMock()
         log_repo.get_stats.return_value = {"sent": 0, "failed": 0}
+        queue_repo = MagicMock()
         watcher_repo = MagicMock()
         logger = MagicMock()
 
         service = ProfileMessageService(
             message_repo=message_repo,
             log_repo=log_repo,
+            queue_repo=queue_repo,
             watcher_repo=watcher_repo,
             logger=logger,
             http_client=http_client,
         )
 
-        # One selected watcher in queue
-        service._watchers_queue = [{"username": "u", "userid": "1", "selected": True}]
+        # Mock queue_repo to return one entry, then empty
+        queue_entry = MagicMock()
+        queue_entry.recipient_username = "u"
+        queue_entry.recipient_userid = "1"
+        queue_entry.queue_id = 123
+        queue_repo.get_pending.side_effect = [[queue_entry], []]
+        # Return 1 initially (for start_worker check), then 0 (for status check)
+        queue_repo.get_queue_count.side_effect = [1, 0]
 
         # Active message templates
         message = MagicMock()

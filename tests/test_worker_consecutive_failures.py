@@ -21,6 +21,7 @@ class TestProfileMessageServiceConsecutiveFailures:
         message_repo = MagicMock()
         log_repo = MagicMock()
         log_repo.get_stats.return_value = {"sent": 0, "failed": 0}
+        queue_repo = MagicMock()
         watcher_repo = MagicMock()
         logger = MagicMock()
 
@@ -30,6 +31,7 @@ class TestProfileMessageServiceConsecutiveFailures:
         return ProfileMessageService(
             message_repo=message_repo,
             log_repo=log_repo,
+            queue_repo=queue_repo,
             watcher_repo=watcher_repo,
             logger=logger,
             http_client=http_client,
@@ -43,11 +45,17 @@ class TestProfileMessageServiceConsecutiveFailures:
         """Worker should stop after MAX_CONSECUTIVE_FAILURES consecutive errors."""
         service = self._create_service()
 
-        # Setup: 6 watchers in queue
-        service._watchers_queue = [
-            {"username": f"user{i}", "userid": f"{i}", "selected": True}
-            for i in range(6)
-        ]
+        # Setup: Mock queue_repo to return 6 entries
+        queue_entries = []
+        for i in range(6):
+            entry = MagicMock()
+            entry.recipient_username = f"user{i}"
+            entry.recipient_userid = f"{i}"
+            entry.queue_id = i
+            queue_entries.append([entry])
+        
+        service.queue_repo.get_pending.side_effect = queue_entries
+        service.queue_repo.get_queue_count.return_value = 1
 
         # Mock active message
         message = MagicMock()
@@ -73,8 +81,8 @@ class TestProfileMessageServiceConsecutiveFailures:
         assert status["consecutive_failures"] == 5
         assert status["processed"] == 0
 
-        # Verify only 5 watchers were processed (not all 6)
-        assert len(service._watchers_queue) == 1  # 1 watcher left
+        # Verify only 5 entries were fetched from queue (not all 6)
+        assert service.queue_repo.get_pending.call_count == 5
 
     @patch("src.service.profile_message_service.time.sleep", return_value=None)
     @patch("src.service.profile_message_service.random.uniform", return_value=0)
@@ -84,11 +92,17 @@ class TestProfileMessageServiceConsecutiveFailures:
         """consecutive_failures should reset to 0 after successful send."""
         service = self._create_service()
 
-        # Setup: 10 watchers in queue
-        service._watchers_queue = [
-            {"username": f"user{i}", "userid": f"{i}", "selected": True}
-            for i in range(10)
-        ]
+        # Setup: Mock queue_repo to return 10 entries
+        queue_entries = []
+        for i in range(10):
+            entry = MagicMock()
+            entry.recipient_username = f"user{i}"
+            entry.recipient_userid = f"{i}"
+            entry.queue_id = i
+            queue_entries.append([entry])
+        
+        service.queue_repo.get_pending.side_effect = queue_entries
+        service.queue_repo.get_queue_count.return_value = 1
 
         # Mock active message
         message = MagicMock()
@@ -96,7 +110,7 @@ class TestProfileMessageServiceConsecutiveFailures:
         message.body = "Hello"
         service.message_repo.get_active_messages.return_value = [message]
 
-        # Mock http_client: fail 3 times, then succeed, then fail 3 more times
+        # Mock http_client: fail 3 times, then succeed, then fail 5 more times
         call_count = 0
 
         def side_effect(*args, **kwargs):
@@ -141,10 +155,15 @@ class TestProfileMessageServiceConsecutiveFailures:
         assert "consecutive_failures" in status
         assert status["consecutive_failures"] == 0
 
-        # After starting worker
-        service._watchers_queue = [
-            {"username": "user1", "userid": "1", "selected": True}
-        ]
+        # After starting worker with one entry that will fail
+        entry = MagicMock()
+        entry.recipient_username = "user1"
+        entry.recipient_userid = "1"
+        entry.queue_id = 1
+        service.queue_repo.get_pending.side_effect = [[entry], []]
+        # Return 1 initially (for start_worker check), then 0 (for status check)
+        service.queue_repo.get_queue_count.side_effect = [1, 0]
+        
         message = MagicMock()
         message.message_id = 1
         message.body = "Hello"
