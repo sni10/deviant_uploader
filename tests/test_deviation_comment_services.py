@@ -151,3 +151,155 @@ def test_comment_poster_non_retryable_http_error_marks_failed() -> None:
 
     queue_repo.mark_failed.assert_called_once()
     assert log_repo.add_log.call_args.kwargs["status"] == DeviationCommentLogStatus.FAILED
+
+
+def test_fave_deviation_success() -> None:
+    """_fave_deviation should return True on successful fave."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock successful POST response
+    http_client.post.return_value = MagicMock()
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    result = service._fave_deviation(
+        access_token="test_token",
+        deviationid="dev123",
+    )
+
+    assert result is True
+    http_client.post.assert_called_once_with(
+        service.FAVE_URL,
+        data={"deviationid": "dev123", "access_token": "test_token"},
+        timeout=30,
+    )
+    logger.info.assert_called_once()
+
+
+def test_fave_deviation_failure_does_not_raise() -> None:
+    """_fave_deviation should return False and log warning on error, not raise."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock HTTP error
+    response = MagicMock()
+    response.status_code = 400
+    http_client.post.side_effect = requests.HTTPError("400", response=response)
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    # Should not raise exception
+    result = service._fave_deviation(
+        access_token="test_token",
+        deviationid="dev123",
+    )
+
+    assert result is False
+    logger.warning.assert_called_once()
+    # Verify warning message contains deviation ID and error
+    warning_call = logger.warning.call_args
+    assert "dev123" in str(warning_call)
+
+
+def test_fave_deviation_generic_exception_does_not_raise() -> None:
+    """_fave_deviation should handle any exception gracefully."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock generic exception
+    http_client.post.side_effect = Exception("Network timeout")
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    # Should not raise exception
+    result = service._fave_deviation(
+        access_token="test_token",
+        deviationid="dev456",
+    )
+
+    assert result is False
+    logger.warning.assert_called_once()
+
+
+def test_worker_calls_fave_after_successful_comment() -> None:
+    """Worker should call _fave_deviation after successful comment."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock config
+    mock_config = MagicMock()
+    mock_config.broadcast_min_delay_seconds = 60
+    mock_config.broadcast_max_delay_seconds = 180
+
+    template = MagicMock()
+    template.message_id = 1
+    template.body = "Hello"
+    template.is_active = True
+    message_repo.get_active_messages.return_value = [template]
+
+    queue_repo.get_one_pending.return_value = {
+        "deviationid": "dev1",
+        "deviation_url": "https://www.deviantart.com/view/1",
+        "author_username": "author",
+        "attempts": 0,
+    }
+    http_client.post.return_value = MagicMock(
+        json=MagicMock(return_value={"commentid": "cid"})
+    )
+    http_client.get_recommended_delay.return_value = 0
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+        config=mock_config,
+    )
+    service._stop_flag.wait = MagicMock(side_effect=[False, True])
+
+    service._worker_loop(access_token="token", template_id=None)
+
+    # Verify http_client.post was called twice: once for comment, once for fave
+    assert http_client.post.call_count == 2
+    
+    # First call: comment
+    first_call = http_client.post.call_args_list[0]
+    assert "comments/post" in first_call[0][0]
+    
+    # Second call: fave
+    second_call = http_client.post.call_args_list[1]
+    assert second_call[0][0] == service.FAVE_URL
+    assert second_call[1]["data"]["deviationid"] == "dev1"
+    assert second_call[1]["data"]["access_token"] == "token"
