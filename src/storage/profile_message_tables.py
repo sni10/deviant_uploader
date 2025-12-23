@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     CheckConstraint,
+    UniqueConstraint,
     Index,
     func,
 )
@@ -51,8 +52,27 @@ profile_message_logs = Table(
     CheckConstraint("status IN ('sent','failed')", name="chk_profile_message_logs_status"),
 )
 
+profile_message_queue = Table(
+    "profile_message_queue",
+    metadata,
+    Column("queue_id", Integer, primary_key=True, autoincrement=True),
+    Column("message_id", Integer, ForeignKey("profile_messages.message_id"), nullable=False),
+    Column("recipient_username", String(100), nullable=False),
+    Column("recipient_userid", String(100), nullable=False),
+    Column("status", String(20), nullable=False, server_default="pending"),
+    Column("priority", Integer, nullable=False, server_default="0"),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False),
+    CheckConstraint("status IN ('pending','processing','completed')", name="chk_profile_message_queue_status"),
+    # Prevent duplicate entries for same message and recipient
+    UniqueConstraint("message_id", "recipient_userid", name="uq_profile_message_queue_message_recipient"),
+)
+
 # Indexes for efficient queries
 Index("idx_watchers_username", watchers.c.username)
 Index("idx_profile_message_logs_message_id", profile_message_logs.c.message_id)
 Index("idx_profile_message_logs_status", profile_message_logs.c.status)
 Index("idx_profile_message_logs_recipient", profile_message_logs.c.recipient_username)
+Index("idx_profile_message_queue_status", profile_message_queue.c.status)
+Index("idx_profile_message_queue_priority", profile_message_queue.c.priority)
+Index("idx_profile_message_queue_recipient", profile_message_queue.c.recipient_username)

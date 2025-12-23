@@ -8,6 +8,7 @@ import requests
 
 from ..config import get_config
 from ..storage import OAuthTokenRepository
+from .http_client import DeviantArtHttpClient
 
 
 class AuthCallbackHandler(BaseHTTPRequestHandler):
@@ -46,17 +47,24 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
 class AuthService:
     """Service for managing DeviantArt OAuth2 authentication."""
     
-    def __init__(self, token_repository: OAuthTokenRepository, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        token_repository: OAuthTokenRepository,
+        logger: Optional[logging.Logger] = None,
+        http_client: Optional[DeviantArtHttpClient] = None,
+    ):
         """
         Initialize authentication service.
         
         Args:
             token_repository: OAuth token repository
             logger: Logger instance
+            http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.config = get_config()
         self.token_repository = token_repository
         self.logger = logger or logging.getLogger(__name__)
+        self.http_client = http_client or DeviantArtHttpClient(logger=self.logger)
     
     def authorize(self) -> bool:
         """
@@ -118,9 +126,7 @@ class AuthService:
         }
         
         try:
-            response = requests.post(self.config.oauth_token_url, data=token_params)
-            response.raise_for_status()
-            
+            response = self.http_client.post(self.config.oauth_token_url, data=token_params)
             token_data = response.json()
             
             if token_data.get('status') == 'success' or 'access_token' in token_data:
@@ -214,9 +220,7 @@ class AuthService:
         }
         
         try:
-            response = requests.post(self.config.oauth_token_url, data=token_params)
-            response.raise_for_status()
-            
+            response = self.http_client.post(self.config.oauth_token_url, data=token_params)
             token_data = response.json()
             
             if token_data.get('status') == 'success' or 'access_token' in token_data:
@@ -251,12 +255,10 @@ class AuthService:
             True if token is valid, False otherwise
         """
         try:
-            response = requests.get(
+            response = self.http_client.get(
                 self.config.api_placebo_url,
                 params={'access_token': access_token}
             )
-            response.raise_for_status()
-            
             data = response.json()
             return data.get('status') == 'success'
             

@@ -34,6 +34,9 @@
                         <a class="nav-link active" aria-current="page" href="/mass_fave.html">Auto Fave</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="/auto_comment.html">Auto Comment</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="/profile_broadcast.html">Profile Broadcast</a>
                     </li>
                 </ul>
@@ -88,12 +91,12 @@
                     <div class="col-md-12">
                         <label for="pages-input" class="form-label small text-muted mb-1">Number of Pages</label>
                         <div class="row g-8 align-items-end">
-                        <div class="col-md-4">
-                            <input type="number" id="pages-input" class="form-control" value="5" min="1" max="20">
-                        </div>
-                        <div class="col-md-8">
-                            <button class="btn btn-primary" onclick="collectFeed()">Collect New Deviations</button>
-                        </div>
+                            <div class="col-md-4">
+                                <input type="number" id="pages-input" class="form-control" value="5" min="1" max="20">
+                            </div>
+                            <div class="col-md-8">
+                                <button class="btn btn-primary" onclick="collectFeed()">Collect New Deviations</button>
+                            </div>
                         </div>
                         <small class="form-text text-muted">Each page contains up to 50 deviations</small>
                     </div>

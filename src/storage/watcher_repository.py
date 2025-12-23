@@ -1,6 +1,7 @@
 """Repository for watchers using SQLAlchemy Core."""
 
-from sqlalchemy import select, insert, func
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .base_repository import BaseRepository
 from .profile_message_tables import watchers
 from ..domain.models import Watcher
@@ -14,11 +15,13 @@ class WatcherRepository(BaseRepository):
 
         Handles both SQLAlchemy connections and raw SQLite connections.
         """
-        if hasattr(self.conn, '_session'):
-            return self.conn._session.execute(statement)
-        else:
-            compiled = statement.compile(compile_kwargs={"literal_binds": True})
-            return self.conn.execute(str(compiled))
+        if hasattr(self.conn, "_session"):
+            # Use the DBConnection wrapper to ensure thread-safety and
+            # automatic rollback on DBAPI/SQLAlchemy errors.
+            return self.conn.execute(statement)
+
+        compiled = statement.compile(compile_kwargs={"literal_binds": True})
+        return self.conn.execute(str(compiled))
 
     def add_or_update_watcher(self, username: str, userid: str) -> None:
         """Add watcher or update fetched_at if exists.
@@ -27,33 +30,17 @@ class WatcherRepository(BaseRepository):
             username: Watcher's DeviantArt username
             userid: Watcher's DeviantArt user ID
         """
-        # Check if watcher exists
-        stmt = select(watchers.c.watcher_id).where(watchers.c.username == username)
-        result = self._execute_core(stmt)
-        existing = result.fetchone()
+        stmt = (
+            pg_insert(watchers)
+            .values(username=username, userid=userid)
+            .on_conflict_do_update(
+                index_elements=[watchers.c.username],
+                set_={"userid": userid, "fetched_at": func.now()},
+            )
+            .inline()
+        )
 
-        if existing:
-            # Update fetched_at (using raw SQL for SQLite compatibility)
-            if hasattr(self.conn, '_session'):
-                # SQLAlchemy
-                from sqlalchemy import update
-                stmt = (
-                    update(watchers)
-                    .where(watchers.c.username == username)
-                    .values(userid=userid, fetched_at=func.now())
-                )
-                self._execute_core(stmt)
-            else:
-                # SQLite
-                self.conn.execute(
-                    "UPDATE watchers SET userid = ?, fetched_at = CURRENT_TIMESTAMP WHERE username = ?",
-                    (userid, username)
-                )
-        else:
-            # Insert new watcher
-            stmt = insert(watchers).values(username=username, userid=userid)
-            self._execute_core(stmt)
-
+        self._execute_core(stmt)
         self.conn.commit()
 
     def get_all_watchers(self, limit: int = 1000) -> list[Watcher]:
@@ -103,3 +90,31 @@ class WatcherRepository(BaseRepository):
 
         row = result.fetchone()
         return row[0] if row else 0
+
+    def delete_watchers_not_in_list(self, usernames: list[str]) -> int:
+        """Delete watchers whose usernames are not in the provided list.
+
+        This is used for synchronization: after fetching current watchers
+        from DeviantArt API, we remove those who unfollowed.
+
+        Args:
+            usernames: List of current watcher usernames to keep
+
+        Returns:
+            Number of watchers deleted
+        """
+        if not usernames:
+            # If list is empty, delete all watchers
+            stmt = delete(watchers)
+        else:
+            # Delete watchers not in the list
+            stmt = delete(watchers).where(watchers.c.username.notin_(usernames))
+
+        result = self._execute_core(stmt)
+        self.conn.commit()
+
+        # Get rowcount
+        if hasattr(result, "rowcount"):
+            return result.rowcount or 0
+
+        return 0

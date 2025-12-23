@@ -23,6 +23,7 @@ from flask import Flask, g
 
 from .stats_routes import (
     register_charts_routes,
+    register_deviation_comment_routes,
     register_mass_fave_routes,
     register_pages_routes,
     register_profile_message_routes,
@@ -38,7 +39,18 @@ from ..storage.feed_deviation_repository import FeedDeviationRepository
 from ..storage.gallery_repository import GalleryRepository
 from ..storage.oauth_token_repository import OAuthTokenRepository
 from ..storage.preset_repository import PresetRepository
+from ..storage.deviation_comment_message_repository import (
+    DeviationCommentMessageRepository,
+)
+from ..storage.deviation_comment_queue_repository import (
+    DeviationCommentQueueRepository,
+)
+from ..storage.deviation_comment_log_repository import DeviationCommentLogRepository
+from ..storage.deviation_comment_state_repository import (
+    DeviationCommentStateRepository,
+)
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
+from ..storage.profile_message_queue_repository import ProfileMessageQueueRepository
 from ..storage.profile_message_repository import ProfileMessageRepository
 from ..storage.deviation_repository import DeviationRepository
 from ..storage.deviation_stats_repository import DeviationStatsRepository
@@ -48,6 +60,8 @@ from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
 from ..storage.watcher_repository import WatcherRepository
 from ..service.auth_service import AuthService
 from ..service.mass_fave_service import MassFaveService
+from ..service.comment_collector_service import CommentCollectorService
+from ..service.comment_poster_service import CommentPosterService
 from ..service.profile_message_service import ProfileMessageService
 from ..service.stats_service import StatsService
 from ..service.uploader import UploaderService
@@ -202,6 +216,43 @@ def get_mass_fave_service() -> MassFaveService:
     return current_app.config["MASS_FAVE_SERVICE"]
 
 
+def get_stats_sync_service() -> StatsService:
+    """Get or create stats sync service as application-level singleton.
+
+    The StatsService worker runs a background thread that must persist
+    beyond individual HTTP requests. Therefore, it uses its own dedicated
+    database connections that are NOT closed by teardown_db().
+
+    Returns:
+        StatsService instance (singleton per application)
+    """
+    from flask import current_app
+
+    if "STATS_SYNC_SERVICE" not in current_app.config:
+        # Create dedicated connections for the worker (not tied to request lifecycle)
+        worker_connection = get_connection()
+        deviation_stats_repo = DeviationStatsRepository(worker_connection)
+        stats_snapshot_repo = StatsSnapshotRepository(worker_connection)
+        user_stats_snapshot_repo = UserStatsSnapshotRepository(worker_connection)
+        deviation_metadata_repo = DeviationMetadataRepository(worker_connection)
+        deviation_repo = DeviationRepository(worker_connection)
+        gallery_repo = GalleryRepository(worker_connection)
+        logger = current_app.config["APP_LOGGER"]
+
+        stats_service = StatsService(
+            deviation_stats_repo,
+            stats_snapshot_repo,
+            user_stats_snapshot_repo,
+            deviation_metadata_repo,
+            deviation_repo,
+            logger,
+            gallery_repository=gallery_repo,
+        )
+        current_app.config["STATS_SYNC_SERVICE"] = stats_service
+
+    return current_app.config["STATS_SYNC_SERVICE"]
+
+
 def get_profile_message_service() -> ProfileMessageService:
     """Get or create profile message service as application-level singleton.
 
@@ -219,16 +270,62 @@ def get_profile_message_service() -> ProfileMessageService:
         worker_conn1 = get_connection()
         worker_conn2 = get_connection()
         worker_conn3 = get_connection()
+        worker_conn4 = get_connection()
         message_repo = ProfileMessageRepository(worker_conn1)
         log_repo = ProfileMessageLogRepository(worker_conn2)
-        watcher_repo = WatcherRepository(worker_conn3)
+        queue_repo = ProfileMessageQueueRepository(worker_conn3)
+        watcher_repo = WatcherRepository(worker_conn4)
         logger = current_app.config["APP_LOGGER"]
         profile_message_service = ProfileMessageService(
-            message_repo, log_repo, watcher_repo, logger
+            message_repo, log_repo, queue_repo, watcher_repo, logger
         )
         current_app.config["PROFILE_MESSAGE_SERVICE"] = profile_message_service
 
     return current_app.config["PROFILE_MESSAGE_SERVICE"]
+
+
+def get_deviation_comment_service() -> tuple[
+    CommentCollectorService,
+    CommentPosterService,
+]:
+    """Get or create deviation comment services as application-level singletons.
+
+    The comment collector and poster use background workers and must persist
+    beyond individual HTTP requests. They use dedicated connections that are
+    not closed by teardown_db().
+
+    Returns:
+        Tuple of (CommentCollectorService, CommentPosterService).
+    """
+    from flask import current_app
+
+    if "DEVIATION_COMMENT_SERVICES" not in current_app.config:
+        message_conn = get_connection()
+        queue_conn = get_connection()
+        log_conn = get_connection()
+        state_conn = get_connection()
+
+        message_repo = DeviationCommentMessageRepository(message_conn)
+        queue_repo = DeviationCommentQueueRepository(queue_conn)
+        log_repo = DeviationCommentLogRepository(log_conn)
+        state_repo = DeviationCommentStateRepository(state_conn)
+
+        logger = current_app.config["APP_LOGGER"]
+        collector = CommentCollectorService(
+            queue_repo=queue_repo,
+            log_repo=log_repo,
+            state_repo=state_repo,
+            logger=logger,
+        )
+        poster = CommentPosterService(
+            message_repo=message_repo,
+            queue_repo=queue_repo,
+            log_repo=log_repo,
+            logger=logger,
+        )
+        current_app.config["DEVIATION_COMMENT_SERVICES"] = (collector, poster)
+
+    return current_app.config["DEVIATION_COMMENT_SERVICES"]
 
 
 def create_app(config: Config | None = None) -> Flask:
@@ -277,7 +374,12 @@ def create_app(config: Config | None = None) -> Flask:
                 g.logger.warning("Request ended with exception: %s", exception)
 
     register_pages_routes(app, static_dir=STATIC_DIR)
-    register_stats_routes(app, get_services=get_services, get_repositories=get_repositories)
+    register_stats_routes(
+        app,
+        get_services=get_services,
+        get_repositories=get_repositories,
+        get_stats_sync_service=get_stats_sync_service,
+    )
     register_charts_routes(app, get_services=get_services)
     register_upload_admin_routes(
         app,
@@ -293,6 +395,11 @@ def create_app(config: Config | None = None) -> Flask:
         app,
         get_services=get_services,
         get_profile_message_service=get_profile_message_service,
+    )
+    register_deviation_comment_routes(
+        app,
+        get_services=get_services,
+        get_deviation_comment_service=get_deviation_comment_service,
     )
     register_thumbnail_routes(
         app,

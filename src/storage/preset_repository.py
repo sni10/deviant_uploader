@@ -3,8 +3,12 @@ import json
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import delete, desc, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from ..domain.models import UploadPreset
 from .base_repository import BaseRepository
+from .models import UploadPreset as UploadPresetModel
 
 
 class PresetRepository(BaseRepository):
@@ -25,108 +29,46 @@ class PresetRepository(BaseRepository):
         Returns:
             Preset ID
         """
-        # Check if preset with this name already exists
-        existing = self.get_preset_by_name(preset.name)
-        
-        # Convert lists to JSON strings
-        tags_json = json.dumps(preset.tags) if preset.tags else None
-        mature_classification_json = json.dumps(preset.mature_classification) if preset.mature_classification else None
-        
-        if existing:
-            # Update existing preset
-            self.conn.execute(
-                """
-                UPDATE upload_presets SET
-                    description = ?,
-                    base_title = ?,
-                    title_increment_start = ?,
-                    last_used_increment = ?,
-                    artist_comments = ?,
-                    tags = ?,
-                    is_ai_generated = ?,
-                    noai = ?,
-                    is_dirty = ?,
-                    is_mature = ?,
-                    mature_level = ?,
-                    mature_classification = ?,
-                    feature = ?,
-                    allow_comments = ?,
-                    display_resolution = ?,
-                    allow_free_download = ?,
-                    add_watermark = ?,
-                    gallery_folderid = ?,
-                    is_default = ?,
-                    updated_at = ?
-                WHERE name = ?
-                """,
-                (
-                    preset.description,
-                    preset.base_title,
-                    preset.title_increment_start,
-                    preset.last_used_increment,
-                    preset.artist_comments,
-                    tags_json,
-                    1 if preset.is_ai_generated else 0,
-                    1 if preset.noai else 0,
-                    1 if preset.is_dirty else 0,
-                    1 if preset.is_mature else 0,
-                    preset.mature_level,
-                    mature_classification_json,
-                    1 if preset.feature else 0,
-                    1 if preset.allow_comments else 0,
-                    preset.display_resolution,
-                    1 if preset.allow_free_download else 0,
-                    1 if preset.add_watermark else 0,
-                    preset.gallery_folderid,
-                    1 if preset.is_default else 0,
-                    datetime.now().isoformat(),
-                    preset.name
-                )
-            )
-            self.conn.commit()
-            return existing.preset_id
-        else:
-            # Insert new preset
-            cursor = self.conn.execute(
-                """
-                INSERT INTO upload_presets (
-                    name, description, base_title,
-                    title_increment_start, last_used_increment,
-                    artist_comments, tags, is_ai_generated, noai, is_dirty,
-                    is_mature, mature_level, mature_classification,
-                    feature, allow_comments, display_resolution,
-                    allow_free_download, add_watermark,
-                    gallery_folderid, is_default,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    preset.name,
-                    preset.description,
-                    preset.base_title,
-                    preset.title_increment_start,
-                    preset.last_used_increment,
-                    preset.artist_comments,
-                    tags_json,
-                    1 if preset.is_ai_generated else 0,
-                    1 if preset.noai else 0,
-                    1 if preset.is_dirty else 0,
-                    1 if preset.is_mature else 0,
-                    preset.mature_level,
-                    mature_classification_json,
-                    1 if preset.feature else 0,
-                    1 if preset.allow_comments else 0,
-                    preset.display_resolution,
-                    1 if preset.allow_free_download else 0,
-                    1 if preset.add_watermark else 0,
-                    preset.gallery_folderid,
-                    1 if preset.is_default else 0,
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                )
-            )
-            self.conn.commit()
-            return cursor.lastrowid
+        table = UploadPresetModel.__table__
+
+        values = {
+            "name": preset.name,
+            "description": preset.description,
+            "base_title": preset.base_title,
+            "title_increment_start": preset.title_increment_start,
+            "last_used_increment": preset.last_used_increment,
+            "artist_comments": preset.artist_comments,
+            "tags": json.dumps(preset.tags) if preset.tags else None,
+            "is_ai_generated": 1 if preset.is_ai_generated else 0,
+            "noai": 1 if preset.noai else 0,
+            "is_dirty": 1 if preset.is_dirty else 0,
+            "is_mature": 1 if preset.is_mature else 0,
+            "mature_level": preset.mature_level,
+            "mature_classification": (
+                json.dumps(preset.mature_classification)
+                if preset.mature_classification
+                else None
+            ),
+            "feature": 1 if preset.feature else 0,
+            "allow_comments": 1 if preset.allow_comments else 0,
+            "display_resolution": preset.display_resolution,
+            "allow_free_download": 1 if preset.allow_free_download else 0,
+            "add_watermark": 1 if preset.add_watermark else 0,
+            "gallery_folderid": preset.gallery_folderid,
+            "is_default": 1 if preset.is_default else 0,
+        }
+
+        stmt = (
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(index_elements=[table.c.name], set_=values)
+            .returning(table.c.id)
+        )
+
+        preset_id = int(self._execute(stmt).scalar_one())
+        self.conn.commit()
+        preset.preset_id = preset_id
+        return preset_id
     
     def get_preset_by_id(self, preset_id: int) -> Optional[UploadPreset]:
         """
@@ -138,17 +80,10 @@ class PresetRepository(BaseRepository):
         Returns:
             UploadPreset object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT * FROM upload_presets WHERE id = ?
-            """,
-            (preset_id,)
-        )
-        row = cursor.fetchone()
-        
-        if row:
-            return self._row_to_preset(row)
-        return None
+        table = UploadPresetModel.__table__
+        stmt = select(table).where(table.c.id == preset_id)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_preset(dict(row))
     
     def get_preset_by_name(self, name: str) -> Optional[UploadPreset]:
         """
@@ -160,17 +95,10 @@ class PresetRepository(BaseRepository):
         Returns:
             UploadPreset object or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT * FROM upload_presets WHERE name = ?
-            """,
-            (name,)
-        )
-        row = cursor.fetchone()
-        
-        if row:
-            return self._row_to_preset(row)
-        return None
+        table = UploadPresetModel.__table__
+        stmt = select(table).where(table.c.name == name)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_preset(dict(row))
     
     def get_all_presets(self) -> list[UploadPreset]:
         """
@@ -179,14 +107,9 @@ class PresetRepository(BaseRepository):
         Returns:
             List of UploadPreset objects
         """
-        cursor = self.conn.execute(
-            """
-            SELECT * FROM upload_presets ORDER BY name
-            """
-        )
-        rows = cursor.fetchall()
-        
-        return [self._row_to_preset(row) for row in rows]
+        table = UploadPresetModel.__table__
+        stmt = select(table).order_by(table.c.name)
+        return [self._row_to_preset(dict(r)) for r in self._execute(stmt).mappings().all()]
     
     def get_default_preset(self) -> Optional[UploadPreset]:
         """
@@ -195,16 +118,10 @@ class PresetRepository(BaseRepository):
         Returns:
             UploadPreset object or None if no default set
         """
-        cursor = self.conn.execute(
-            """
-            SELECT * FROM upload_presets WHERE is_default = 1 LIMIT 1
-            """
-        )
-        row = cursor.fetchone()
-        
-        if row:
-            return self._row_to_preset(row)
-        return None
+        table = UploadPresetModel.__table__
+        stmt = select(table).where(table.c.is_default == 1).limit(1)
+        row = self._execute(stmt).mappings().first()
+        return None if row is None else self._row_to_preset(dict(row))
     
     def delete_preset(self, preset_id: int) -> bool:
         """
@@ -216,14 +133,10 @@ class PresetRepository(BaseRepository):
         Returns:
             True if deleted, False if not found
         """
-        cursor = self.conn.execute(
-            """
-            DELETE FROM upload_presets WHERE id = ?
-            """,
-            (preset_id,)
-        )
+        table = UploadPresetModel.__table__
+        result = self._execute(delete(table).where(table.c.id == preset_id))
         self.conn.commit()
-        return cursor.rowcount > 0
+        return (result.rowcount or 0) > 0
     
     def increment_preset_counter(self, preset_id: int) -> int:
         """
@@ -235,71 +148,75 @@ class PresetRepository(BaseRepository):
         Returns:
             New counter value
         """
-        # Get current value
         preset = self.get_preset_by_id(preset_id)
         if not preset:
             raise ValueError(f"Preset with id {preset_id} not found")
-        
+
         new_value = preset.last_used_increment + 1
-        
-        # Update counter
-        self.conn.execute(
-            """
-            UPDATE upload_presets 
-            SET last_used_increment = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (new_value, datetime.now().isoformat(), preset_id)
+
+        table = UploadPresetModel.__table__
+        stmt = (
+            update(table)
+            .where(table.c.id == preset_id)
+            .values(last_used_increment=new_value, updated_at=datetime.now())
         )
+        self._execute(stmt)
         self.conn.commit()
-        
+
         return new_value
     
-    def _row_to_preset(self, row: tuple) -> UploadPreset:
+    def _row_to_preset(self, row: dict) -> UploadPreset:
         """
         Convert database row to UploadPreset object.
         
         Args:
-            row: Database row tuple
+            row: Database row mapping
             
         Returns:
             UploadPreset object
         """
         # Parse JSON fields - handle None, empty strings, and invalid JSON
-        tags_str = (row[7] or "").strip()
+        tags_str = (row.get("tags") or "").strip()
         try:
             tags = json.loads(tags_str) if tags_str else []
         except json.JSONDecodeError:
             tags = []
         
-        mature_class_str = (row[13] or "").strip()
+        mature_class_str = (row.get("mature_classification") or "").strip()
         try:
             mature_classification = json.loads(mature_class_str) if mature_class_str else []
         except json.JSONDecodeError:
             mature_classification = []
         
+        def _dt(value: object) -> datetime | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value))
+
         return UploadPreset(
-            name=row[1],
-            description=row[2],
-            base_title=row[3],
-            title_increment_start=row[4],
-            last_used_increment=row[5],
-            artist_comments=row[6],
+            name=row.get("name"),
+            description=row.get("description"),
+            base_title=row.get("base_title"),
+            title_increment_start=row.get("title_increment_start") or 1,
+            last_used_increment=row.get("last_used_increment") or 1,
+            artist_comments=row.get("artist_comments"),
             tags=tags,
-            is_ai_generated=bool(row[8]),
-            noai=bool(row[9]),
-            is_dirty=bool(row[10]),
-            is_mature=bool(row[11]),
-            mature_level=row[12],
+            is_ai_generated=bool(row.get("is_ai_generated")),
+            noai=bool(row.get("noai")),
+            is_dirty=bool(row.get("is_dirty")),
+            is_mature=bool(row.get("is_mature")),
+            mature_level=row.get("mature_level"),
             mature_classification=mature_classification,
-            feature=bool(row[14]),
-            allow_comments=bool(row[15]),
-            display_resolution=row[16],
-            allow_free_download=bool(row[17]),
-            add_watermark=bool(row[18]),
-            gallery_folderid=row[19],
-            preset_id=row[0],
-            is_default=bool(row[20]),
-            created_at=datetime.fromisoformat(row[21]) if row[21] else datetime.now(),
-            updated_at=datetime.fromisoformat(row[22]) if row[22] else datetime.now()
+            feature=bool(row.get("feature")),
+            allow_comments=bool(row.get("allow_comments")),
+            display_resolution=row.get("display_resolution") or 0,
+            allow_free_download=bool(row.get("allow_free_download")),
+            add_watermark=bool(row.get("add_watermark")),
+            gallery_folderid=row.get("gallery_folderid"),
+            preset_id=row.get("id"),
+            is_default=bool(row.get("is_default")),
+            created_at=_dt(row.get("created_at")) or datetime.now(),
+            updated_at=_dt(row.get("updated_at")) or datetime.now(),
         )

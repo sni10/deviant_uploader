@@ -76,6 +76,7 @@ class Gallery(Base):
     name = Column(String, nullable=False)
     parent = Column(String)
     size = Column(Integer)
+    sync_enabled = Column(Integer, nullable=False, default=1)  # SQLite uses INTEGER for boolean
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

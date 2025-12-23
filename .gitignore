@@ -81,8 +81,9 @@ cython_debug/
 # Project-specific files
 upload_template.json
 .junie/
-/.claude/
+/.claude/*
 /local/
 /PROBLEM_ARCH.md
 /AGENTS.md
 /local_dev_examples/
+/.claude/settings.local.json

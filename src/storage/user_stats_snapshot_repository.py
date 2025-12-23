@@ -1,7 +1,13 @@
 """Repository for user watcher statistics snapshots."""
+
+from datetime import date, timedelta
 from typing import Optional
 
+from sqlalchemy import desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from .base_repository import BaseRepository
+from .models import User, UserStatsSnapshot
 
 
 class UserStatsSnapshotRepository(BaseRepository):
@@ -35,26 +41,31 @@ class UserStatsSnapshotRepository(BaseRepository):
         Returns:
             Row ID of inserted/updated record
         """
-        cursor = self.conn.execute(
-            """
-            INSERT INTO user_stats_snapshots (
-                user_id,
-                username,
-                snapshot_date,
-                watchers,
-                friends,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(username, snapshot_date) DO UPDATE SET
-                user_id = excluded.user_id,
-                watchers = excluded.watchers,
-                friends = excluded.friends,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (user_id, username, snapshot_date, watchers, friends),
+        table = UserStatsSnapshot.__table__
+
+        stmt = (
+            pg_insert(table)
+            .values(
+                user_id=user_id,
+                username=username,
+                snapshot_date=snapshot_date,
+                watchers=watchers,
+                friends=friends,
+            )
+            .on_conflict_do_update(
+                index_elements=[table.c.username, table.c.snapshot_date],
+                set_={
+                    "user_id": user_id,
+                    "watchers": watchers,
+                    "friends": friends,
+                },
+            )
+            .returning(table.c.id)
         )
+
+        row_id = self._execute(stmt).scalar_one()
         self.conn.commit()
-        return cursor.lastrowid
+        return int(row_id)
 
     def get_latest_user_stats_snapshot(self, username: str) -> Optional[dict]:
         """Return latest watcher snapshot for a given user or ``None``.
@@ -70,40 +81,57 @@ class UserStatsSnapshotRepository(BaseRepository):
         Returns:
             Dictionary with snapshot fields and watchers_diff, or None if not found
         """
-        cursor = self.conn.execute(
-            """
-            SELECT
-                s.username,
-                s.snapshot_date,
-                s.watchers,
-                s.friends,
-                s.created_at,
-                s.updated_at,
-                u.profile_url,
-                y.watchers AS yesterday_watchers
-            FROM user_stats_snapshots AS s
-            LEFT JOIN users AS u ON u.username = s.username
-            LEFT JOIN user_stats_snapshots AS y
-                ON y.username = s.username
-                AND y.snapshot_date = date(s.snapshot_date, '-1 day')
-            WHERE s.username = ?
-            ORDER BY s.snapshot_date DESC, s.id DESC
-            LIMIT 1
-            """,
-            (username,),
+        snapshots = UserStatsSnapshot.__table__
+        users = User.__table__
+
+        latest_stmt = (
+            select(
+                snapshots.c.username,
+                snapshots.c.snapshot_date,
+                snapshots.c.watchers,
+                snapshots.c.friends,
+                snapshots.c.created_at,
+                snapshots.c.updated_at,
+                users.c.profile_url,
+            )
+            .select_from(snapshots.outerjoin(users, users.c.username == snapshots.c.username))
+            .where(snapshots.c.username == username)
+            .order_by(desc(snapshots.c.snapshot_date), desc(snapshots.c.id))
+            .limit(1)
         )
-        row = cursor.fetchone()
-        if not row:
+        latest = self._execute(latest_stmt).mappings().first()
+        if latest is None:
             return None
 
-        columns = [desc[0] for desc in cursor.description]
-        result = dict(zip(columns, row))
-        
-        # Calculate watchers_diff (today - yesterday)
-        watchers = result.get("watchers") or 0
-        yesterday_watchers = result.get("yesterday_watchers") or 0
+        result = dict(latest)
+
+        yesterday_watchers = 0
+        snapshot_date = result.get("snapshot_date")
+        if snapshot_date:
+            try:
+                yesterday_date = (
+                    date.fromisoformat(snapshot_date) - timedelta(days=1)
+                ).isoformat()
+            except ValueError:
+                yesterday_date = None
+
+            if yesterday_date:
+                y_stmt = (
+                    select(snapshots.c.watchers)
+                    .where(
+                        (snapshots.c.username == username)
+                        & (snapshots.c.snapshot_date == yesterday_date)
+                    )
+                    .order_by(desc(snapshots.c.id))
+                    .limit(1)
+                )
+                y_value = self._scalar(y_stmt)
+                yesterday_watchers = int(y_value or 0)
+
+        result["yesterday_watchers"] = yesterday_watchers
+        watchers = int(result.get("watchers") or 0)
         result["watchers_diff"] = watchers - yesterday_watchers
-        
+
         return result
 
     def get_user_stats_history(
@@ -118,21 +146,19 @@ class UserStatsSnapshotRepository(BaseRepository):
         Returns:
             List of dictionaries with snapshot fields, ordered by date descending
         """
-        cursor = self.conn.execute(
-            """
-            SELECT
-                username,
-                snapshot_date,
-                watchers,
-                friends,
-                created_at,
-                updated_at
-            FROM user_stats_snapshots
-            WHERE username = ?
-            ORDER BY snapshot_date DESC, id DESC
-            LIMIT ?
-            """,
-            (username, limit),
+        table = UserStatsSnapshot.__table__
+        stmt = (
+            select(
+                table.c.username,
+                table.c.snapshot_date,
+                table.c.watchers,
+                table.c.friends,
+                table.c.created_at,
+                table.c.updated_at,
+            )
+            .where(table.c.username == username)
+            .order_by(desc(table.c.snapshot_date), desc(table.c.id))
+            .limit(limit)
         )
-        columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        return [dict(row) for row in self._execute(stmt).mappings().all()]

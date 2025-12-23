@@ -4,7 +4,7 @@ Storage layer with database abstraction supporting SQLite and PostgreSQL.
 Follows DDD and SOLID principles with separate repositories for each domain entity.
 Database backend is selected via DATABASE_TYPE configuration.
 """
-from .database import init_database, get_connection, get_database_adapter
+from .database import get_connection, get_database_adapter
 from .base_repository import BaseRepository, DBConnection
 from .user_repository import UserRepository
 from .oauth_token_repository import OAuthTokenRepository
@@ -14,6 +14,10 @@ from .deviation_stats_repository import DeviationStatsRepository
 from .stats_snapshot_repository import StatsSnapshotRepository
 from .user_stats_snapshot_repository import UserStatsSnapshotRepository
 from .deviation_metadata_repository import DeviationMetadataRepository
+from .deviation_comment_message_repository import DeviationCommentMessageRepository
+from .deviation_comment_queue_repository import DeviationCommentQueueRepository
+from .deviation_comment_log_repository import DeviationCommentLogRepository
+from .deviation_comment_state_repository import DeviationCommentStateRepository
 
 __all__ = [
     "BaseRepository",
@@ -26,10 +30,13 @@ __all__ = [
     "StatsSnapshotRepository",
     "UserStatsSnapshotRepository",
     "DeviationMetadataRepository",
+    "DeviationCommentMessageRepository",
+    "DeviationCommentQueueRepository",
+    "DeviationCommentLogRepository",
+    "DeviationCommentStateRepository",
     "create_repositories",
     "get_connection",
     "get_database_adapter",
-    "init_database",
 ]
 
 
