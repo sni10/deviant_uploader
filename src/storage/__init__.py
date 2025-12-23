@@ -14,6 +14,10 @@ from .deviation_stats_repository import DeviationStatsRepository
 from .stats_snapshot_repository import StatsSnapshotRepository
 from .user_stats_snapshot_repository import UserStatsSnapshotRepository
 from .deviation_metadata_repository import DeviationMetadataRepository
+from .deviation_comment_message_repository import DeviationCommentMessageRepository
+from .deviation_comment_queue_repository import DeviationCommentQueueRepository
+from .deviation_comment_log_repository import DeviationCommentLogRepository
+from .deviation_comment_state_repository import DeviationCommentStateRepository
 
 __all__ = [
     "BaseRepository",
@@ -26,6 +30,10 @@ __all__ = [
     "StatsSnapshotRepository",
     "UserStatsSnapshotRepository",
     "DeviationMetadataRepository",
+    "DeviationCommentMessageRepository",
+    "DeviationCommentQueueRepository",
+    "DeviationCommentLogRepository",
+    "DeviationCommentStateRepository",
     "create_repositories",
     "get_connection",
     "get_database_adapter",

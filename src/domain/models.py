@@ -306,3 +306,70 @@ class ProfileMessageQueue:
     queue_id: Optional[int] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class DeviationCommentMessage:
+    """Template for comments posted under deviations."""
+
+    title: str
+    body: str
+    is_active: bool = True
+
+    # Metadata
+    message_id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+class DeviationCommentQueueStatus(str, Enum):
+    """Status of a deviation comment queue entry."""
+
+    PENDING = "pending"
+    COMMENTED = "commented"
+    FAILED = "failed"
+
+
+@dataclass
+class DeviationCommentQueueItem:
+    """Queue item for deviation comments."""
+
+    deviationid: str
+    source: str
+    ts: int
+    deviation_url: Optional[str] = None
+    title: Optional[str] = None
+    author_username: Optional[str] = None
+    author_userid: Optional[str] = None
+    status: DeviationCommentQueueStatus = DeviationCommentQueueStatus.PENDING
+    attempts: int = 0
+    last_error: Optional[str] = None
+
+    # Metadata
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+class DeviationCommentLogStatus(str, Enum):
+    """Status of a deviation comment send attempt."""
+
+    SENT = "sent"
+    FAILED = "failed"
+
+
+@dataclass
+class DeviationCommentLog:
+    """Log entry for comments sent under deviations."""
+
+    message_id: int
+    deviationid: str
+    status: DeviationCommentLogStatus
+    comment_text: Optional[str] = None
+    deviation_url: Optional[str] = None
+    author_username: Optional[str] = None
+    commentid: Optional[str] = None
+    error_message: Optional[str] = None
+
+    # Metadata
+    log_id: Optional[int] = None
+    sent_at: datetime = field(default_factory=datetime.now)

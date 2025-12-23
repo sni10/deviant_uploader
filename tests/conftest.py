@@ -14,6 +14,7 @@ from src.storage.adapters.sqlalchemy_adapter import SQLAlchemyConnection
 from src.storage.feed_tables import metadata as feed_metadata
 from src.storage.models import Base
 from src.storage.profile_message_tables import metadata as profile_message_metadata
+from src.storage.deviation_comment_tables import metadata as deviation_comment_metadata
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -74,6 +75,7 @@ def db_conn(pg_engine, pg_schema: str) -> Iterator[SQLAlchemyConnection]:
         Base.metadata.create_all(bind=conn)
         feed_metadata.create_all(bind=conn)
         profile_message_metadata.create_all(bind=conn)
+        deviation_comment_metadata.create_all(bind=conn)
 
     try:
         yield SQLAlchemyConnection(session)

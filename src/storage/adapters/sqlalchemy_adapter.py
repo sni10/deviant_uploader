@@ -13,6 +13,7 @@ from ..base_repository import DBConnection
 from ..models import Base
 from ..feed_tables import metadata as feed_metadata
 from ..profile_message_tables import metadata as profile_message_metadata
+from ..deviation_comment_tables import metadata as deviation_comment_metadata
 
 
 class SQLAlchemyConnection:
@@ -142,6 +143,9 @@ class SQLAlchemyAdapter:
 
             # Create all tables defined in Core metadata (profile message tables)
             profile_message_metadata.create_all(bind=conn)
+
+            # Create all tables defined in Core metadata (deviation comment tables)
+            deviation_comment_metadata.create_all(bind=conn)
     
     def get_connection(self) -> DBConnection:
         """Create and return a new SQLAlchemy session wrapped as DBConnection.

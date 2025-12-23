@@ -305,6 +305,77 @@ class ProfileMessageService:
         )
         return delay
 
+    def _format_http_error(self, error: requests.HTTPError) -> str:
+        """Format HTTP error with response details when available."""
+        response = getattr(error, "response", None)
+        if response is None:
+            return str(error)
+
+        status_code = getattr(response, "status_code", None)
+        error_payload: object | None
+        try:
+            error_payload = response.json()
+        except Exception:  # noqa: BLE001
+            error_payload = None
+
+        error_desc = None
+        error_code = None
+        error_name = None
+        if isinstance(error_payload, dict):
+            error_desc = error_payload.get("error_description")
+            error_code = error_payload.get("error_code")
+            error_name = error_payload.get("error")
+
+        parts = [f"HTTP {status_code}"]
+        if error_name:
+            parts.append(str(error_name))
+        if error_code is not None:
+            parts.append(f"code={error_code}")
+        if error_desc:
+            parts.append(str(error_desc))
+
+        return ": ".join([parts[0], " ".join(parts[1:])]) if len(parts) > 1 else parts[0]
+
+    def _is_critical_error(self, error: requests.HTTPError) -> bool:
+        """
+        Check if HTTP error is critical and requires immediate worker stop.
+        
+        Critical errors include:
+        - Spam detection by DeviantArt
+        - Account restrictions or bans
+        - Other policy violations
+        
+        Returns:
+            True if worker should stop immediately to prevent escalating sanctions.
+        """
+        response = getattr(error, "response", None)
+        if response is None:
+            return False
+
+        try:
+            error_payload = response.json()
+        except Exception:  # noqa: BLE001
+            return False
+
+        if not isinstance(error_payload, dict):
+            return False
+
+        # Check error_description for spam-related keywords
+        error_desc = error_payload.get("error_description", "")
+        if isinstance(error_desc, str):
+            error_desc_lower = error_desc.lower()
+            # Spam detection
+            if "spam" in error_desc_lower:
+                return True
+            # Account restrictions
+            if "banned" in error_desc_lower or "suspended" in error_desc_lower:
+                return True
+            # Rate limit abuse (different from normal 429)
+            if "abuse" in error_desc_lower or "violation" in error_desc_lower:
+                return True
+
+        return False
+
     def _is_worker_alive(self) -> bool:
         """Return True if the background worker thread is alive."""
         return bool(self._worker_thread and self._worker_thread.is_alive())
@@ -967,8 +1038,81 @@ class ProfileMessageService:
                     )
                     time.sleep(delay)
 
+                except requests.HTTPError as e:
+                    # HTTP error - check if it's critical first
+                    error_msg = self._format_http_error(e)
+                    
+                    # Check for critical errors that require immediate worker stop
+                    if self._is_critical_error(e):
+                        self.logger.critical(
+                            "CRITICAL ERROR DETECTED: %s - Stopping worker immediately to prevent escalating sanctions from DeviantArt",
+                            error_msg,
+                        )
+                        self.log_repo.add_log(
+                            message_id=message_id,
+                            recipient_username=username,
+                            recipient_userid=userid,
+                            status=MessageLogStatus.FAILED,
+                            error_message=error_msg,
+                        )
+                        with self._stats_lock:
+                            self._worker_stats["errors"] += 1
+                            self._worker_stats["consecutive_failures"] += 1
+                            self._worker_stats["last_error"] = error_msg
+                        # Remove from queue
+                        try:
+                            self.queue_repo.remove_from_queue(queue_id)
+                        except Exception as ex:
+                            self.logger.warning("Failed to remove queue entry %s: %s", queue_id, ex)
+                        break
+                    
+                    # Non-critical HTTP error - handle normally
+                    self.log_repo.add_log(
+                        message_id=message_id,
+                        recipient_username=username,
+                        recipient_userid=userid,
+                        status=MessageLogStatus.FAILED,
+                        error_message=error_msg,
+                    )
+
+                    with self._stats_lock:
+                        self._worker_stats["errors"] += 1
+                        self._worker_stats["consecutive_failures"] += 1
+                        self._worker_stats["last_error"] = error_msg
+                        consecutive_failures = self._worker_stats["consecutive_failures"]
+
+                    self.logger.error(
+                        "Failed to send to %s: %s (consecutive failures: %d/%d)",
+                        username,
+                        error_msg,
+                        consecutive_failures,
+                        self.MAX_CONSECUTIVE_FAILURES,
+                    )
+
+                    # Remove from queue after failed send
+                    try:
+                        self.queue_repo.remove_from_queue(queue_id)
+                    except Exception as ex:
+                        self.logger.warning("Failed to remove queue entry %s: %s", queue_id, ex)
+
+                    # Stop worker if too many consecutive failures
+                    if consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
+                        self.logger.critical(
+                            "Worker stopped: %d consecutive failures reached (limit: %d)",
+                            consecutive_failures,
+                            self.MAX_CONSECUTIVE_FAILURES,
+                        )
+                        break
+
+                    delay = self.http_client.get_recommended_delay()
+                    self.logger.debug(
+                        "Waiting %s seconds before retry after failure",
+                        delay,
+                    )
+                    time.sleep(delay)
+
                 except requests.RequestException as e:
-                    # HTTP client already retried - this is final failure
+                    # Non-HTTP request error - handle normally
                     error_msg = f"Request failed after retries: {str(e)}"
 
                     self.log_repo.add_log(
@@ -996,8 +1140,8 @@ class ProfileMessageService:
                     # Remove from queue after failed send
                     try:
                         self.queue_repo.remove_from_queue(queue_id)
-                    except Exception as e:
-                        self.logger.warning("Failed to remove queue entry %s: %s", queue_id, e)
+                    except Exception as ex:
+                        self.logger.warning("Failed to remove queue entry %s: %s", queue_id, ex)
 
                     # Stop worker if too many consecutive failures
                     if consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:

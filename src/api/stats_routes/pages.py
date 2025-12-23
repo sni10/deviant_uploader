@@ -44,3 +44,8 @@ def register_pages_routes(app: Flask, *, static_dir: Path) -> None:
     def profile_broadcast_page():
         """Serve Profile Message Broadcasting page."""
         return send_from_directory(static_dir, "profile_broadcast.html")
+
+    @app.route("/auto_comment.html")
+    def auto_comment_page():
+        """Serve Auto Comment page."""
+        return send_from_directory(static_dir, "auto_comment.html")

@@ -39,7 +39,7 @@ class Config:
         self.redirect_uri = os.getenv('DA_REDIRECT_URI', 'http://localhost:8080/callback')
         
         # OAuth scopes required for browse, stash and publish
-        self.scopes = os.getenv('DA_SCOPES', 'browse stash publish')
+        self.scopes = os.getenv('DA_SCOPES', 'browse stash publish comment.post')
         
         # Database configuration
         self.database_url = self._get_database_url()

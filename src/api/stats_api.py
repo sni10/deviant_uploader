@@ -23,6 +23,7 @@ from flask import Flask, g
 
 from .stats_routes import (
     register_charts_routes,
+    register_deviation_comment_routes,
     register_mass_fave_routes,
     register_pages_routes,
     register_profile_message_routes,
@@ -38,6 +39,16 @@ from ..storage.feed_deviation_repository import FeedDeviationRepository
 from ..storage.gallery_repository import GalleryRepository
 from ..storage.oauth_token_repository import OAuthTokenRepository
 from ..storage.preset_repository import PresetRepository
+from ..storage.deviation_comment_message_repository import (
+    DeviationCommentMessageRepository,
+)
+from ..storage.deviation_comment_queue_repository import (
+    DeviationCommentQueueRepository,
+)
+from ..storage.deviation_comment_log_repository import DeviationCommentLogRepository
+from ..storage.deviation_comment_state_repository import (
+    DeviationCommentStateRepository,
+)
 from ..storage.profile_message_log_repository import ProfileMessageLogRepository
 from ..storage.profile_message_queue_repository import ProfileMessageQueueRepository
 from ..storage.profile_message_repository import ProfileMessageRepository
@@ -49,6 +60,8 @@ from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
 from ..storage.watcher_repository import WatcherRepository
 from ..service.auth_service import AuthService
 from ..service.mass_fave_service import MassFaveService
+from ..service.comment_collector_service import CommentCollectorService
+from ..service.comment_poster_service import CommentPosterService
 from ..service.profile_message_service import ProfileMessageService
 from ..service.stats_service import StatsService
 from ..service.uploader import UploaderService
@@ -271,6 +284,50 @@ def get_profile_message_service() -> ProfileMessageService:
     return current_app.config["PROFILE_MESSAGE_SERVICE"]
 
 
+def get_deviation_comment_service() -> tuple[
+    CommentCollectorService,
+    CommentPosterService,
+]:
+    """Get or create deviation comment services as application-level singletons.
+
+    The comment collector and poster use background workers and must persist
+    beyond individual HTTP requests. They use dedicated connections that are
+    not closed by teardown_db().
+
+    Returns:
+        Tuple of (CommentCollectorService, CommentPosterService).
+    """
+    from flask import current_app
+
+    if "DEVIATION_COMMENT_SERVICES" not in current_app.config:
+        message_conn = get_connection()
+        queue_conn = get_connection()
+        log_conn = get_connection()
+        state_conn = get_connection()
+
+        message_repo = DeviationCommentMessageRepository(message_conn)
+        queue_repo = DeviationCommentQueueRepository(queue_conn)
+        log_repo = DeviationCommentLogRepository(log_conn)
+        state_repo = DeviationCommentStateRepository(state_conn)
+
+        logger = current_app.config["APP_LOGGER"]
+        collector = CommentCollectorService(
+            queue_repo=queue_repo,
+            log_repo=log_repo,
+            state_repo=state_repo,
+            logger=logger,
+        )
+        poster = CommentPosterService(
+            message_repo=message_repo,
+            queue_repo=queue_repo,
+            log_repo=log_repo,
+            logger=logger,
+        )
+        current_app.config["DEVIATION_COMMENT_SERVICES"] = (collector, poster)
+
+    return current_app.config["DEVIATION_COMMENT_SERVICES"]
+
+
 def create_app(config: Config | None = None) -> Flask:
     """Create and configure the combined Flask application.
 
@@ -338,6 +395,11 @@ def create_app(config: Config | None = None) -> Flask:
         app,
         get_services=get_services,
         get_profile_message_service=get_profile_message_service,
+    )
+    register_deviation_comment_routes(
+        app,
+        get_services=get_services,
+        get_deviation_comment_service=get_deviation_comment_service,
     )
     register_thumbnail_routes(
         app,

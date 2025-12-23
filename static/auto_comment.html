@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profile Broadcasting - DeviantArt Dashboard</title>
+    <title>Auto Comment - DeviantArt Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
     <style>
         body { background-color: #f8f9fa; }
@@ -36,10 +36,10 @@
                         <a class="nav-link" href="/mass_fave.html">Auto Fave</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/auto_comment.html">Auto Comment</a>
+                        <a class="nav-link active" aria-current="page" href="/auto_comment.html">Auto Comment</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" aria-current="page" href="/profile_broadcast.html">Profile Broadcast</a>
+                        <a class="nav-link" href="/profile_broadcast.html">Profile Broadcast</a>
                     </li>
                 </ul>
             </div>
@@ -47,23 +47,23 @@
     </nav>
 
     <div class="container py-4">
-        <h1 class="h3 mb-4">Profile Broadcasting</h1>
+        <h1 class="h3 mb-4">Auto Comment</h1>
 
         <!-- Stats Row -->
         <div class="row g-3 mb-4">
             <div class="col-md-3">
                 <div class="card stat-card shadow-sm">
                     <div class="card-body">
-                        <div class="stat-label">Queue</div>
-                        <div class="stat-value text-primary" id="stat-queue">0</div>
+                        <div class="stat-label">Pending</div>
+                        <div class="stat-value text-primary" id="stat-pending">0</div>
                     </div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="card shadow-sm">
                     <div class="card-body">
-                        <div class="stat-label">Sent</div>
-                        <div class="stat-value text-success" id="stat-sent">0</div>
+                        <div class="stat-label">Commented</div>
+                        <div class="stat-value text-success" id="stat-commented">0</div>
                     </div>
                 </div>
             </div>
@@ -85,84 +85,50 @@
             </div>
         </div>
 
-        <!-- Message Templates -->
+        <!-- Templates -->
         <div class="card shadow-sm mb-3">
             <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Message Templates</h5>
-                <button class="btn btn-sm btn-primary" onclick="showCreateMessageModal()">Create New</button>
+                <h5 class="mb-0">Comment Templates</h5>
+                <button class="btn btn-sm btn-primary" onclick="showCreateTemplateModal()">Create New</button>
             </div>
             <div class="card-body">
-                <div id="messages-list"></div>
+                <div id="templates-list"></div>
             </div>
         </div>
 
-        <!-- Fetch Watchers -->
+        <!-- Collectors -->
         <div class="card shadow-sm mb-3">
             <div class="card-header bg-white">
-                <h5 class="mb-0">Fetch Watchers</h5>
+                <h5 class="mb-0">Collectors</h5>
             </div>
             <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label for="username-input" class="form-label">Username</label>
-                        <input type="text" id="username-input" class="form-control" placeholder="Enter DA username" value="aiviso">
-                    </div>
-                    <div class="col-md-6">
-                        <label for="max-watchers-input" class="form-label">Max Watchers</label>
-                        <input type="number" id="max-watchers-input" class="form-control" value="50" min="1">
-                    </div>
-                    <div class="col-12">
-                        <button class="btn btn-primary" onclick="fetchWatchers()">Fetch Watchers</button>
-                        <button class="btn btn-outline-danger ms-2" onclick="pruneUnfollowedWatchers()">Sync DB (remove unfollowed)</button>
-                        <button class="btn btn-secondary ms-2" onclick="clearQueue()">Clear Queue</button>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-12">
+                        <label for="pages-input" class="form-label small text-muted mb-1">Pages</label>
+                            <div class="row g-8 align-items-end">
+                                <div class="col-md-4">
+                                    <input type="number" id="pages-input" class="form-control" value="5" min="1" max="20">
+                                </div>
+                                <div class="col-md-4">
+                                    <button class="btn btn-primary" onclick="collectWatchFeed()">Collect Watch Feed</button>
+                                    <button class="btn btn-outline-primary" onclick="collectGlobalFeed()">Collect Global Feed</button>
+                                </div>
+                            </div>
+                        <small class="form-text text-muted">Each page is up to 50 deviations</small>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Saved Watchers (from DB) -->
+        <!-- Queue -->
         <div class="card shadow-sm mb-3">
             <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Saved Watchers (from Database)</h5>
+                <h5 class="mb-0">Comment Queue (Pending)</h5>
                 <div>
-                    <button class="btn btn-sm btn-primary" onclick="addSelectedSavedToQueue()">Add to Queue</button>
-                    <button class="btn btn-sm btn-success ms-1" onclick="selectAllSavedWatchers()">Select All</button>
-                    <button class="btn btn-sm btn-warning ms-1" onclick="deselectAllSavedWatchers()">Deselect All</button>
-                    <button class="btn btn-sm btn-secondary ms-1" onclick="loadSavedWatchers()">Refresh</button>
-                </div>
-            </div>
-            <div class="card-body">
-                <p class="text-muted small">Previously fetched watchers. Click "Add to Queue" to add them to the sending queue.</p>
-                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                    <table class="table table-sm table-hover">
-                        <thead class="sticky-top bg-white">
-                            <tr>
-                                <th style="width: 50px;">#</th>
-                                <th style="width: 50px;">Select</th>
-                                <th>Username</th>
-                                <th>User ID</th>
-                                <th>Last Fetched</th>
-                            </tr>
-                        </thead>
-                        <tbody id="saved-watchers-table-body">
-                            <tr>
-                                <td colspan="5" class="text-center text-muted">No saved watchers</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Watchers Queue -->
-        <div class="card shadow-sm mb-3" id="watchers-list-card">
-            <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Watchers Queue (for Sending)</h5>
-                <div>
-                    <button class="btn btn-sm btn-info" onclick="saveSelectedToDb()">Save to DB</button>
+                    <button class="btn btn-sm btn-secondary" onclick="loadQueue()">Refresh</button>
                     <button class="btn btn-sm btn-danger ms-1" onclick="removeSelectedFromQueue()">Remove Selected</button>
-                    <button class="btn btn-sm btn-success ms-1" onclick="selectAllWatchers()">Select All</button>
-                    <button class="btn btn-sm btn-warning ms-1" onclick="deselectAllWatchers()">Deselect All</button>
+                    <button class="btn btn-sm btn-warning ms-1" onclick="resetFailedQueue()">Reset Failed</button>
+                    <button class="btn btn-sm btn-outline-danger ms-1" onclick="clearPendingQueue()">Clear Pending</button>
                 </div>
             </div>
             <div class="card-body">
@@ -172,13 +138,17 @@
                             <tr>
                                 <th style="width: 50px;">#</th>
                                 <th style="width: 50px;">Select</th>
-                                <th>Username</th>
-                                <th>User ID</th>
+                                <th>Deviation</th>
+                                <th>Author</th>
+                                <th>Source</th>
+                                <th>Status</th>
+                                <th>Attempts</th>
+                                <th>Last Error</th>
                             </tr>
                         </thead>
-                        <tbody id="watchers-table-body">
+                        <tbody id="queue-table-body">
                             <tr>
-                                <td colspan="4" class="text-center text-muted">No watchers in queue</td>
+                                <td colspan="8" class="text-center text-muted">No pending items</td>
                             </tr>
                         </tbody>
                     </table>
@@ -189,21 +159,36 @@
         <!-- Worker Control -->
         <div class="card shadow-sm mb-3">
             <div class="card-header bg-white">
-                <h5 class="mb-0">Broadcast Worker</h5>
+                <h5 class="mb-0">Comment Worker</h5>
             </div>
             <div class="card-body">
-                <div class="alert alert-info mb-3" role="alert">
-                    <i class="bi bi-info-circle"></i>
-                    <strong>Randomized Templates:</strong> Worker will randomly select from active message templates for each send.
-                    To activate/deactivate templates, click "Edit" button and use "Active" checkbox in the edit dialog.
+                <div class="row g-3 align-items-end mb-3">
+
+                    <div class="col-md-12">
+                        <label class="form-label small text-muted mb-1">Template</label>
+                        <div class="row g-8 align-items-end">
+
+                            <div class="col-md-4">
+                                <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Worker</button>
+                                <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Worker</button>
+                            </div>
+                            <div class="col-md-4">
+                                <select id="template-select" class="form-select">
+                                    <option value="">Random Active Template</option>
+                                </select>
+                            </div>
+                        </div>
+
+                    </div>
                 </div>
-                <div class="d-flex gap-2 mb-3">
-                    <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Broadcasting</button>
-                    <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Broadcasting</button>
-                    <button class="btn btn-warning" onclick="retryFailedMessages()">Retry Failed</button>
-                </div>
-                <div>
-                    <span class="badge bg-secondary" id="worker-status">Stopped</span>
+                <div class="row g-3 align-items-end mb-3">
+                    <div class="col-md-12">
+                        <div class="row g-8 align-items-end">
+                            <div class="col-md-4">
+                                <span class="badge bg-secondary" id="worker-status">Stopped</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -211,10 +196,10 @@
         <!-- Status -->
         <div id="status" class="alert alert-secondary py-2 mb-3" role="alert">Ready.</div>
 
-        <!-- Activity Log -->
+        <!-- Logs -->
         <div class="card shadow-sm mb-3">
             <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Send Log</h5>
+                <h5 class="mb-0">Comment Log</h5>
                 <button class="btn btn-sm btn-secondary" onclick="loadLogs()">Refresh</button>
             </div>
             <div class="card-body">
@@ -223,11 +208,10 @@
                         <thead>
                             <tr>
                                 <th>Sent At</th>
-                                <th>Recipient</th>
+                                <th>Deviation</th>
                                 <th>Status</th>
                                 <th>Comment ID</th>
                                 <th>Error</th>
-                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="logs-table-body"></tbody>
@@ -237,39 +221,39 @@
         </div>
     </div>
 
-    <!-- Create/Edit Message Modal -->
-    <div class="modal fade" id="messageModal" tabindex="-1">
+    <!-- Create/Edit Template Modal -->
+    <div class="modal fade" id="templateModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="messageModalTitle">Create Message Template</h5>
+                    <h5 class="modal-title" id="templateModalTitle">Create Template</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label for="message-title" class="form-label">Title</label>
-                        <input type="text" class="form-control" id="message-title" placeholder="Enter template title">
+                        <label for="template-title" class="form-label">Title</label>
+                        <input type="text" class="form-control" id="template-title" placeholder="Enter template title">
                     </div>
                     <div class="mb-3">
-                        <label for="message-body" class="form-label">Message Body</label>
-                        <textarea class="form-control" id="message-body" rows="5" placeholder="Enter comment text"></textarea>
+                        <label for="template-body" class="form-label">Comment Body</label>
+                        <textarea class="form-control" id="template-body" rows="5" placeholder="Enter comment text"></textarea>
                     </div>
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="message-active" checked>
-                        <label class="form-check-label" for="message-active">
+                        <input class="form-check-input" type="checkbox" id="template-active" checked>
+                        <label class="form-check-label" for="template-active">
                             Active
                         </label>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="saveMessage()">Save</button>
+                    <button type="button" class="btn btn-primary" onclick="saveTemplate()">Save</button>
                 </div>
             </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
-    <script src="/static/profile_broadcast.js"></script>
+    <script src="/static/auto_comment.js"></script>
 </body>
 </html>
