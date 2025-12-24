@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import Mock, patch
 from logging import Logger
+import requests
 
 from src.service.base_worker_service import BaseWorkerService
 from src.service.http_client import DeviantArtHttpClient
@@ -203,3 +204,194 @@ class TestBaseWorkerService:
             assert call_args[1] == 10  # delay value
             assert call_args[2] == 10  # min_val
             assert call_args[3] == 10  # max_val
+
+    def test_is_expired_token_error_detects_invalid_token(self):
+        """Test that expired token error is correctly detected."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # Create mock HTTP error with expired token response
+        response = Mock()
+        response.status_code = 401
+        response.json.return_value = {
+            "error": "invalid_token",
+            "error_description": "Expired oAuth2 user token",
+        }
+
+        error = requests.HTTPError()
+        error.response = response
+
+        assert service._is_expired_token_error(error) is True
+
+    def test_is_expired_token_error_detects_expired_in_description(self):
+        """Test that expired token is detected from error description."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        response = Mock()
+        response.status_code = 401
+        response.json.return_value = {
+            "error": "token_error",
+            "error_description": "Token has expired",
+        }
+
+        error = requests.HTTPError()
+        error.response = response
+
+        assert service._is_expired_token_error(error) is True
+
+    def test_is_expired_token_error_ignores_other_401_errors(self):
+        """Test that other 401 errors are not detected as expired token."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        response = Mock()
+        response.status_code = 401
+        response.json.return_value = {
+            "error": "unauthorized",
+            "error_description": "Access denied",
+        }
+
+        error = requests.HTTPError()
+        error.response = response
+
+        assert service._is_expired_token_error(error) is False
+
+    def test_is_expired_token_error_ignores_non_401_status(self):
+        """Test that non-401 errors are not detected as expired token."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        response = Mock()
+        response.status_code = 403
+        response.json.return_value = {
+            "error": "invalid_token",
+            "error_description": "Expired oAuth2 user token",
+        }
+
+        error = requests.HTTPError()
+        error.response = response
+
+        assert service._is_expired_token_error(error) is False
+
+    def test_is_expired_token_error_handles_no_response(self):
+        """Test that error without response is not detected as expired token."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        error = requests.HTTPError()
+        error.response = None
+
+        assert service._is_expired_token_error(error) is False
+
+    def test_refresh_access_token_success(self):
+        """Test successful token refresh."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # Mock auth service
+        mock_auth_service = Mock()
+        mock_auth_service.ensure_authenticated.return_value = True
+        mock_auth_service.get_valid_token.return_value = "new_token_123"
+
+        service._auth_service = mock_auth_service
+
+        # Refresh token
+        new_token = service._refresh_access_token()
+
+        assert new_token == "new_token_123"
+        mock_auth_service.ensure_authenticated.assert_called_once()
+        mock_auth_service.get_valid_token.assert_called_once()
+        logger.info.assert_any_call("Attempting to refresh expired OAuth token...")
+        logger.info.assert_any_call("Successfully refreshed OAuth token")
+
+    def test_refresh_access_token_authentication_fails(self):
+        """Test token refresh when authentication fails."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # Mock auth service with authentication failure
+        mock_auth_service = Mock()
+        mock_auth_service.ensure_authenticated.return_value = False
+
+        service._auth_service = mock_auth_service
+
+        # Refresh token
+        new_token = service._refresh_access_token()
+
+        assert new_token is None
+        logger.error.assert_called_once_with("Token refresh failed: authentication failed")
+
+    def test_refresh_access_token_get_valid_token_fails(self):
+        """Test token refresh when get_valid_token returns None."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # Mock auth service with valid authentication but no token
+        mock_auth_service = Mock()
+        mock_auth_service.ensure_authenticated.return_value = True
+        mock_auth_service.get_valid_token.return_value = None
+
+        service._auth_service = mock_auth_service
+
+        # Refresh token
+        new_token = service._refresh_access_token()
+
+        assert new_token is None
+        logger.error.assert_called_once_with(
+            "Token refresh failed: could not get valid token"
+        )
+
+    def test_refresh_access_token_no_auth_service(self):
+        """Test token refresh when auth_service not provided."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # No auth service set
+        service._auth_service = None
+
+        # Refresh token
+        new_token = service._refresh_access_token()
+
+        assert new_token is None
+        logger.error.assert_called_once_with(
+            "Cannot refresh token: auth_service not provided to start_worker()"
+        )
+
+    def test_refresh_access_token_exception_handling(self):
+        """Test token refresh exception handling."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # Mock auth service that raises exception
+        mock_auth_service = Mock()
+        mock_auth_service.ensure_authenticated.side_effect = Exception("Network error")
+
+        service._auth_service = mock_auth_service
+
+        # Refresh token
+        new_token = service._refresh_access_token()
+
+        assert new_token is None
+        logger.error.assert_called()
+        args = logger.error.call_args[0]
+        assert "Token refresh failed with exception" in args[0]
+
+    def test_start_worker_stores_auth_service(self):
+        """Test that start_worker stores auth_service for token refresh."""
+        logger = Mock(spec=Logger)
+        service = ConcreteWorkerService(logger=logger)
+
+        # Mock auth service
+        mock_auth_service = Mock()
+
+        # Mock _validate_worker_start to succeed
+        with patch.object(service, "_validate_worker_start", return_value={"valid": True}):
+            # Mock _worker_loop to avoid thread issues
+            with patch.object(service, "_worker_loop"):
+                # Call start_worker with auth_service
+                result = service.start_worker("test_token", auth_service=mock_auth_service)
+
+        # Verify auth_service was stored
+        assert service._auth_service is mock_auth_service
+        assert result["success"] is True

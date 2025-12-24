@@ -205,7 +205,7 @@ def register_profile_message_routes(
                 )
 
             service = get_profile_message_service()
-            result = service.start_worker(access_token)
+            result = service.start_worker(access_token, auth_service=auth_service)
 
             return jsonify(result)
         except Exception as e:  # noqa: BLE001

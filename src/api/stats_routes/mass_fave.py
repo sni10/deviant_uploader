@@ -65,7 +65,7 @@ def register_mass_fave_routes(
                 )
 
             mass_fave_service = get_mass_fave_service()
-            result = mass_fave_service.start_worker(access_token)
+            result = mass_fave_service.start_worker(access_token, auth_service=auth_service)
 
             return jsonify(result)
         except Exception as e:  # noqa: BLE001

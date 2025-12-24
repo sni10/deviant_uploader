@@ -240,7 +240,7 @@ def register_deviation_comment_routes(
             template_id = int(template_id) if template_id is not None else None
 
             _collector, poster = get_deviation_comment_service()
-            result = poster.start_worker(access_token, template_id=template_id)
+            result = poster.start_worker(access_token, auth_service=auth_service, template_id=template_id)
 
             return jsonify(result)
         except Exception as e:  # noqa: BLE001

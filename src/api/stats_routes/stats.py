@@ -184,7 +184,7 @@ def register_stats_routes(
                 ), 401
 
             stats_sync_service = get_stats_sync_service()
-            result = stats_sync_service.start_worker(access_token, username=username)
+            result = stats_sync_service.start_worker(access_token, auth_service=auth_service, username=username)
             return jsonify(result)
         except Exception as exc:  # noqa: BLE001
             g.logger.error("Failed to start stats worker", exc_info=exc)

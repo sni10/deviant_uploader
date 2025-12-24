@@ -117,12 +117,19 @@ class BaseRepository(ABC):
     def _insert_returning_id(
         self, insert_stmt: Any, returning_col: Any | None = None
     ) -> int | None:
-        """Execute insert statement with RETURNING and return id."""
+        """Execute insert statement with RETURNING and return id.
+        
+        Note:
+            Fetches the row before committing to avoid cursor closure issues
+            in PostgreSQL/psycopg2 multi-threaded environments.
+        """
 
         if returning_col is None:
             raise ValueError("returning_col is required for returning id")
 
         stmt = insert_stmt.returning(returning_col)
-        result = self._execute_and_commit(stmt)
+        result = self._execute(stmt)
+        # Fetch the row BEFORE committing to avoid cursor closure
         row = result.fetchone()
+        self._conn.commit()
         return None if row is None else row[0]

@@ -65,6 +65,9 @@ class BaseWorkerService(BaseService):
             "consecutive_failures": 0,
         }
 
+        # Auth service for automatic token refresh (set by start_worker)
+        self._auth_service = None
+
     def _is_worker_alive(self) -> bool:
         """Return True if the background worker thread is alive."""
         return bool(self._worker_thread and self._worker_thread.is_alive())
@@ -123,15 +126,15 @@ class BaseWorkerService(BaseService):
 
     def _is_critical_error(self, error: requests.HTTPError) -> bool:
         """Check if HTTP error is critical and requires immediate worker stop.
-        
+
         Critical errors include:
         - Spam detection by DeviantArt
         - Account restrictions or bans
         - Other policy violations
-        
+
         Args:
             error: HTTP error from requests library
-            
+
         Returns:
             True if worker should stop immediately to prevent escalating sanctions
         """
@@ -162,6 +165,76 @@ class BaseWorkerService(BaseService):
                 return True
 
         return False
+
+    def _is_expired_token_error(self, error: requests.HTTPError) -> bool:
+        """Check if HTTP error indicates expired OAuth token.
+
+        Args:
+            error: HTTPError exception
+
+        Returns:
+            True if error is HTTP 401 with invalid_token/expired token
+        """
+        response = getattr(error, "response", None)
+        if response is None:
+            return False
+
+        if response.status_code != 401:
+            return False
+
+        try:
+            error_data = response.json()
+            error_type = error_data.get("error", "")
+            error_desc = error_data.get("error_description", "").lower()
+
+            # Check for expired token indicators
+            if error_type == "invalid_token":
+                return True
+            if "expired" in error_desc:
+                return True
+        except (ValueError, AttributeError):
+            pass
+
+        return False
+
+    def _refresh_access_token(self) -> str | None:
+        """Attempt to refresh access token using auth service.
+
+        This method is called automatically when HTTP 401 invalid_token error
+        is detected during worker execution. It uses the auth_service passed
+        to start_worker() to re-authenticate and obtain a new valid token.
+
+        Returns:
+            New access token if successful, None otherwise
+        """
+        if self._auth_service is None:
+            self.logger.error(
+                "Cannot refresh token: auth_service not provided to start_worker()"
+            )
+            return None
+
+        self.logger.info("Attempting to refresh expired OAuth token...")
+
+        try:
+            # Re-authenticate to get new token
+            if not self._auth_service.ensure_authenticated():
+                self.logger.error("Token refresh failed: authentication failed")
+                return None
+
+            # Get new valid token
+            new_token = self._auth_service.get_valid_token()
+            if not new_token:
+                self.logger.error("Token refresh failed: could not get valid token")
+                return None
+
+            self.logger.info("Successfully refreshed OAuth token")
+            return new_token
+
+        except Exception as e:
+            self.logger.error(
+                "Token refresh failed with exception: %s", e, exc_info=True
+            )
+            return None
 
     @abstractmethod
     def _validate_worker_start(self) -> dict[str, object]:
@@ -258,19 +331,21 @@ class BaseWorkerService(BaseService):
                 ],
             }
 
-    def start_worker(self, *args, **kwargs) -> dict[str, object]:
-        """Start background worker thread.
-        
+    def start_worker(self, *args, auth_service=None, **kwargs) -> dict[str, object]:
+        """Start background worker thread with optional automatic token refresh.
+
         Template method that:
         1. Checks if worker is already running
-        2. Validates pre-conditions via _validate_worker_start()
-        3. Initializes worker state
-        4. Starts worker thread with _worker_loop()
-        
+        2. Stores auth_service for automatic token refresh
+        3. Validates pre-conditions via _validate_worker_start()
+        4. Initializes worker state
+        5. Starts worker thread with _worker_loop()
+
         Args:
             *args: Service-specific arguments passed to _worker_loop()
+            auth_service: Optional AuthService for automatic token refresh on expiration
             **kwargs: Service-specific keyword arguments passed to _worker_loop()
-            
+
         Returns:
             Status dictionary: {success: bool, message: str}
         """
@@ -279,6 +354,9 @@ class BaseWorkerService(BaseService):
 
         # Reset stale flag if thread is not alive
         self._worker_running = False
+
+        # Store auth_service for automatic token refresh in worker loop
+        self._auth_service = auth_service
 
         # Validate pre-conditions
         validation = self._validate_worker_start()

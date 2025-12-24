@@ -103,6 +103,19 @@ class ProfileMessageQueueRepository(BaseRepository):
             for row in rows
         ]
 
+    def mark_pending(self, queue_id: int) -> None:
+        """Mark queue entry as pending (e.g., for retry after token refresh).
+
+        Args:
+            queue_id: Queue entry ID
+        """
+        stmt = (
+            update(profile_message_queue)
+            .where(profile_message_queue.c.queue_id == queue_id)
+            .values(status=QueueStatus.PENDING.value)
+        )
+        self._execute_and_commit(stmt)
+
     def mark_processing(self, queue_id: int) -> None:
         """Mark queue entry as processing.
 
