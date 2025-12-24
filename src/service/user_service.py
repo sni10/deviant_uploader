@@ -7,16 +7,18 @@ This module provides functionality to:
 - Sync user information to local database
 """
 
-import requests
-from typing import Optional
 from logging import Logger
+from typing import Optional
+
+import requests
 
 from ..domain.models import User
 from ..storage import UserRepository
+from .base_service import BaseService
 from .http_client import DeviantArtHttpClient
 
 
-class UserService:
+class UserService(BaseService):
     """
     Service for managing DeviantArt user information.
     
@@ -44,11 +46,12 @@ class UserService:
             token_repo: OAuth token repository for automatic token cleanup
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
+        if http_client is None:
+            http_client = DeviantArtHttpClient(
+                logger=logger, token_repo=token_repo
+            )
+        super().__init__(logger, token_repo, http_client)
         self.user_repository = user_repository
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
     
     def fetch_whoami(self, access_token: str) -> Optional[dict]:
         """

@@ -10,32 +10,6 @@ from ..domain.models import DeviationCommentLog, DeviationCommentLogStatus
 class DeviationCommentLogRepository(BaseRepository):
     """Provides persistence for deviation comment logs."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "execute"):
-            try:
-                return self.conn.execute(statement)
-            except TypeError:
-                pass
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row."""
-        result = self._execute_core(statement)
-
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     def add_log(
         self,
         message_id: int,
@@ -73,13 +47,9 @@ class DeviationCommentLogRepository(BaseRepository):
             error_message=error_message,
         )
 
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        if hasattr(result, "inserted_primary_key"):
-            return result.inserted_primary_key[0]
-
-        return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return self._insert_returning_id(
+            stmt, returning_col=deviation_comment_logs.c.log_id
+        )
 
     def get_logs(
         self,

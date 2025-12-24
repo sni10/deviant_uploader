@@ -11,7 +11,7 @@ from src.service.comment_poster_service import CommentPosterService
 from src.domain.models import DeviationCommentLogStatus
 
 
-@patch("src.service.comment_collector_service.time.sleep", autospec=True)
+@patch("src.service.api_pagination_helper.time.sleep", autospec=True)
 def test_comment_collector_collects_and_sets_offset(sleep_mock: MagicMock) -> None:
     """Collector should paginate, set offset, and respect recommended delay."""
     queue_repo = MagicMock()
@@ -91,8 +91,8 @@ def test_comment_poster_worker_success_logs_and_marks() -> None:
         log_repo=log_repo,
         logger=logger,
         http_client=http_client,
-        config=mock_config,
     )
+    service._config = mock_config
     # First call (broadcast_delay): return False to continue
     # Second call (after success): return True to stop
     service._stop_flag.wait = MagicMock(side_effect=[False, True])
@@ -141,8 +141,8 @@ def test_comment_poster_non_retryable_http_error_marks_failed() -> None:
         log_repo=log_repo,
         logger=logger,
         http_client=http_client,
-        config=mock_config,
     )
+    service._config = mock_config
     # First call (broadcast_delay): return False to continue
     # Second call (after failure): return True to stop
     service._stop_flag.wait = MagicMock(side_effect=[False, True])
@@ -285,8 +285,8 @@ def test_worker_calls_fave_after_successful_comment() -> None:
         log_repo=log_repo,
         logger=logger,
         http_client=http_client,
-        config=mock_config,
     )
+    service._config = mock_config
     service._stop_flag.wait = MagicMock(side_effect=[False, True])
 
     service._worker_loop(access_token="token", template_id=None)
@@ -303,3 +303,249 @@ def test_worker_calls_fave_after_successful_comment() -> None:
     assert second_call[0][0] == service.FAVE_URL
     assert second_call[1]["data"]["deviationid"] == "dev1"
     assert second_call[1]["data"]["access_token"] == "token"
+
+
+def test_comment_poster_http_500_removes_from_queue_and_logs_deleted() -> None:
+    """HTTP 500 should remove item from queue and log as DELETED."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock config
+    mock_config = MagicMock()
+    mock_config.broadcast_min_delay_seconds = 60
+    mock_config.broadcast_max_delay_seconds = 180
+
+    template = MagicMock()
+    template.message_id = 1
+    template.body = "Hello"
+    template.is_active = True
+    message_repo.get_active_messages.return_value = [template]
+
+    queue_item = {
+        "deviationid": "dev1",
+        "deviation_url": "https://www.deviantart.com/view/1",
+        "author_username": "author",
+        "attempts": 0,
+    }
+    queue_repo.get_one_pending.return_value = queue_item
+
+    # Mock HTTP 500 error
+    response = MagicMock()
+    response.status_code = 500
+    response.json.return_value = {
+        "error": "server_error",
+        "error_description": "Internal Server Error.",
+        "error_code": 500,
+        "status": "error",
+    }
+    http_error = requests.HTTPError("500 Server Error", response=response)
+    http_client.post.side_effect = http_error
+    http_client.get_recommended_delay.return_value = 0
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+    service._config = mock_config
+    # First call (broadcast_delay): return False to continue
+    # Second call (after handling deleted): return True to stop
+    service._stop_flag.wait = MagicMock(side_effect=[False, True])
+
+    service._worker_loop(access_token="token", template_id=None)
+
+    # Verify item was removed from queue
+    queue_repo.remove_by_ids.assert_called_once_with(["dev1"])
+
+    # Verify log was created with DELETED status
+    assert log_repo.add_log.call_count == 1
+    log_call = log_repo.add_log.call_args
+    assert log_call.kwargs["status"] == DeviationCommentLogStatus.DELETED
+    assert log_call.kwargs["deviationid"] == "dev1"
+    assert "HTTP 500" in log_call.kwargs["error_message"]
+    assert "server_error" in log_call.kwargs["error_message"]
+
+    # Verify queue was NOT marked as failed (since it was removed)
+    queue_repo.mark_failed.assert_not_called()
+
+    # Verify worker logged warning about deleted deviation
+    logger.warning.assert_called_once()
+    warning_call = logger.warning.call_args
+    assert "deleted" in str(warning_call).lower()
+    assert "dev1" in str(warning_call)
+
+
+def test_check_deviation_exists_returns_true_for_http_200() -> None:
+    """_check_deviation_exists should return True when deviation exists (HTTP 200)."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock successful GET request (HTTP 200)
+    http_client.get.return_value = MagicMock()
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    result = service._check_deviation_exists("token", "dev123")
+
+    assert result is True
+    http_client.get.assert_called_once()
+    logger.debug.assert_called_once()
+
+
+def test_check_deviation_exists_returns_false_for_http_404() -> None:
+    """_check_deviation_exists should return False when deviation is deleted (HTTP 404)."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock HTTP 404 error
+    response = MagicMock()
+    response.status_code = 404
+    http_error = requests.HTTPError("404 Not Found", response=response)
+    http_client.get.side_effect = http_error
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    result = service._check_deviation_exists("token", "dev123")
+
+    assert result is False
+    logger.debug.assert_called_once()
+
+
+def test_check_deviation_exists_returns_false_for_http_500() -> None:
+    """_check_deviation_exists should return False when deviation is deleted (HTTP 500)."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock HTTP 500 error
+    response = MagicMock()
+    response.status_code = 500
+    http_error = requests.HTTPError("500 Server Error", response=response)
+    http_client.get.side_effect = http_error
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    result = service._check_deviation_exists("token", "dev123")
+
+    assert result is False
+    logger.debug.assert_called_once()
+
+
+def test_check_deviation_exists_returns_true_for_other_errors() -> None:
+    """_check_deviation_exists should return True for temporary errors (network, timeout)."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock network error
+    http_client.get.side_effect = Exception("Network timeout")
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+
+    result = service._check_deviation_exists("token", "dev123")
+
+    assert result is True
+    logger.warning.assert_called_once()
+
+
+def test_worker_skips_deleted_deviation_without_broadcast_delay() -> None:
+    """Worker should skip deleted deviations immediately without waiting for broadcast_delay."""
+    message_repo = MagicMock()
+    queue_repo = MagicMock()
+    log_repo = MagicMock()
+    logger = MagicMock()
+    http_client = MagicMock()
+
+    # Mock config
+    mock_config = MagicMock()
+    mock_config.broadcast_min_delay_seconds = 120
+    mock_config.broadcast_max_delay_seconds = 240
+
+    template = MagicMock()
+    template.message_id = 1
+    template.body = "Hello"
+    template.is_active = True
+    message_repo.get_active_messages.return_value = [template]
+
+    queue_item = {
+        "deviationid": "dev1",
+        "deviation_url": "https://www.deviantart.com/view/1",
+        "author_username": "author",
+        "attempts": 0,
+    }
+    # First call returns queue_item, subsequent calls return None
+    # Need multiple None because loop continues after handling deleted deviation
+    queue_repo.get_one_pending.side_effect = [queue_item, None, None, None]
+
+    # Mock _check_deviation_exists to return False (deviation deleted)
+    response = MagicMock()
+    response.status_code = 404
+    http_error = requests.HTTPError("404 Not Found", response=response)
+    http_client.get.side_effect = http_error
+    http_client.get_recommended_delay.return_value = 0
+
+    service = CommentPosterService(
+        message_repo=message_repo,
+        queue_repo=queue_repo,
+        log_repo=log_repo,
+        logger=logger,
+        http_client=http_client,
+    )
+    # Mock _stop_flag.wait: return False first time (continue loop), True second time (stop loop)
+    service._stop_flag.wait = MagicMock(side_effect=[False, True])
+
+    service._worker_loop(access_token="token", template_id=None)
+
+    # Verify deviation was removed from queue
+    queue_repo.remove_by_ids.assert_called_once_with(["dev1"])
+
+    # Verify log was created with DELETED status
+    assert log_repo.add_log.call_count == 1
+    log_call = log_repo.add_log.call_args
+    assert log_call.kwargs["status"] == DeviationCommentLogStatus.DELETED
+
+    # Verify http_client.post was NEVER called (no comment attempt)
+    # This proves that worker skipped deleted deviation without trying to comment
+    http_client.post.assert_not_called()
+    
+    # Verify http_client.get was called (deviation existence check)
+    http_client.get.assert_called_once()

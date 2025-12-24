@@ -1,18 +1,19 @@
 """Service for auto-faving deviations from feed."""
 
-import time
 import random
-import threading
+import time
 from logging import Logger
 from typing import Optional
 
 import requests
 
 from ..storage.feed_deviation_repository import FeedDeviationRepository
+from .api_pagination_helper import APIPaginationHelper
 from .http_client import DeviantArtHttpClient
+from .base_worker_service import BaseWorkerService
 
 
-class MassFaveService:
+class MassFaveService(BaseWorkerService):
     """Coordinates feed collection and auto-faving workflow."""
 
     FEED_URL = "https://www.deviantart.com/api/v1/oauth2/browse/deviantsyouwatch"
@@ -26,23 +27,25 @@ class MassFaveService:
         token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
     ) -> None:
-        self.repo = feed_deviation_repo
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
+        super().__init__(logger, token_repo, http_client)
 
-        # Worker state
-        self._worker_thread: Optional[threading.Thread] = None
-        self._worker_running = False
-        self._stop_flag = threading.Event()
-        self._worker_stats = {
-            "processed": 0,
-            "errors": 0,
-            "last_error": None,
-            "consecutive_failures": 0,
-        }
-        self._stats_lock = threading.Lock()
+        self.repo = feed_deviation_repo
+
+    def _get_error_code(self, error: requests.HTTPError) -> int | str | None:
+        """Extract error_code from HTTP error payload if available."""
+        response = getattr(error, "response", None)
+        if response is None:
+            return None
+
+        try:
+            payload = response.json()
+        except Exception:  # noqa: BLE001
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        return payload.get("error_code")
 
     # ========== Collector ==========
 
@@ -62,7 +65,6 @@ class MassFaveService:
         """
         offset_str = self.repo.get_state("feed_offset")
         offset = int(offset_str) if offset_str else 0
-        pages = 0
         deviations_added = 0
         limit = 50  # Maximum allowed by API
 
@@ -73,125 +75,77 @@ class MassFaveService:
             limit,
         )
 
-        while pages < max_pages:
-            params = {
-                "access_token": access_token,
-                "mature_content": "true",
-                "limit": limit,
-                "offset": offset,
-            }
+        pagination = APIPaginationHelper(self.http_client, self.logger)
 
-            try:
-                response = self.http_client.get(self.FEED_URL, params=params, timeout=30)
-                data = response.json()
-            except requests.RequestException as e:
-                self.logger.error("Feed fetch failed: %s", e)
-                break
+        def process_deviation(deviation: dict) -> bool | None:
+            """Store deviation in queue, returning True when added."""
+            deviationid = deviation.get("deviationid")
+            if not deviationid:
+                return None
 
-            # Extract deviations from results
-            results = data.get("results", [])
             current_time = int(time.time())
+            ts = deviation.get("published_time", current_time)
+            if isinstance(ts, str):
+                try:
+                    ts = int(ts)
+                except ValueError:
+                    ts = current_time
 
-            for deviation in results:
-                deviationid = deviation.get("deviationid")
-                # Use published_time if available, otherwise current timestamp
-                ts = deviation.get("published_time", current_time)
-                if isinstance(ts, str):
-                    # If timestamp is string, try to convert or use current time
-                    try:
-                        ts = int(ts)
-                    except ValueError:
-                        ts = current_time
+            self.repo.add_deviation(str(deviationid), ts)
+            return True
 
-                if deviationid:
-                    self.repo.add_deviation(str(deviationid), ts)
-                    deviations_added += 1
-
-            pages += 1
-
-            # Update offset for next page
-            has_more = bool(data.get("has_more"))
-            next_offset = data.get("next_offset")
-
+        def update_state(page_info: dict[str, object]) -> None:
+            """Persist feed offset after each page."""
+            next_offset = page_info.get("next_offset")
             if next_offset is not None:
-                offset = next_offset
-                self.repo.set_state("feed_offset", str(offset))
+                self.repo.set_state("feed_offset", str(page_info["offset"]))
 
-            if not has_more:
-                break
+        try:
+            for _ in pagination.paginate(
+                url=self.FEED_URL,
+                access_token=access_token,
+                limit=limit,
+                max_pages=max_pages,
+                additional_params={"mature_content": "true"},
+                process_item=process_deviation,
+                initial_offset=offset,
+                page_callback=update_state,
+            ):
+                deviations_added += 1
+        except requests.RequestException as e:
+            self.logger.error("Feed fetch failed: %s", e)
 
-            # Delay between pages to avoid rate limiting
-            if pages < max_pages:
-                delay = self.http_client.get_recommended_delay()
-                self.logger.debug(
-                    "Waiting %s seconds before next feed page request",
-                    delay,
-                )
-                time.sleep(delay)
+        pages = pagination.pages_fetched
+        final_offset = (
+            pagination.last_offset if pagination.last_offset is not None else offset
+        )
 
         self.logger.info(
             "Feed collection completed: pages=%s, deviations=%s, offset=%s",
             pages,
             deviations_added,
-            offset,
+            final_offset,
         )
 
         return {
             "pages": pages,
             "deviations_added": deviations_added,
-            "offset": offset,
+            "offset": final_offset,
         }
 
     # ========== Worker ==========
 
-    def start_worker(self, access_token: str) -> dict:
-        """Start background worker thread.
-
-        Args:
-            access_token: OAuth access token for faving
+    def _validate_worker_start(self) -> dict[str, object]:
+        """Validate conditions before starting worker.
 
         Returns:
-            Status dictionary: {success, message}
+            Dictionary with validation result:
+            - If valid: {"valid": True}
+            - If invalid: {"valid": False, "message": "error description"}
         """
-        if self._worker_running:
-            return {"success": False, "message": "Worker already running"}
-
-        self._stop_flag.clear()
-        with self._stats_lock:
-            self._worker_stats = {
-                "processed": 0,
-                "errors": 0,
-                "last_error": None,
-                "consecutive_failures": 0,
-            }
-
-        self._worker_thread = threading.Thread(
-            target=self._worker_loop,
-            args=(access_token,),
-            daemon=True,
-        )
-        self._worker_running = True
-        self._worker_thread.start()
-
-        self.logger.info("Worker thread started")
-        return {"success": True, "message": "Worker started"}
-
-    def stop_worker(self) -> dict:
-        """Stop background worker thread.
-
-        Returns:
-            Status dictionary: {success, message}
-        """
-        if not self._worker_running:
-            return {"success": False, "message": "Worker not running"}
-
-        self._stop_flag.set()
-        if self._worker_thread:
-            self._worker_thread.join(timeout=10)
-
-        self._worker_running = False
-        self.logger.info("Worker thread stopped")
-        return {"success": True, "message": "Worker stopped"}
+        # MassFaveService doesn't require pre-validation
+        # Worker will wait if queue is empty
+        return {"valid": True}
 
     def get_worker_status(self) -> dict:
         """Get worker and queue status.
@@ -199,17 +153,9 @@ class MassFaveService:
         Returns:
             Dictionary with: {running, processed, errors, last_error, queue_stats}
         """
-        queue_stats = self.repo.get_stats()
-
-        with self._stats_lock:
-            return {
-                "running": self._worker_running,
-                "processed": self._worker_stats["processed"],
-                "errors": self._worker_stats["errors"],
-                "last_error": self._worker_stats["last_error"],
-                "consecutive_failures": self._worker_stats["consecutive_failures"],
-                "queue_stats": queue_stats,
-            }
+        status = super().get_worker_status()
+        status["queue_stats"] = self.repo.get_stats()
+        return status
 
     def reset_failed_deviations(self) -> dict:
         """Reset all failed deviations back to pending status.
@@ -234,7 +180,7 @@ class MassFaveService:
 
                 if not deviation:
                     # Queue empty, wait with stop_flag check (interruptible sleep)
-                    if self._stop_flag.wait(timeout=2):
+                    if self._interruptible_sleep(2):
                         # Stop flag was set during wait
                         self.logger.info("Worker stop requested during idle wait")
                         break
@@ -259,12 +205,26 @@ class MassFaveService:
 
                     # Random delay with stop_flag check (interruptible sleep)
                     delay = random.uniform(2, 10)
-                    if self._stop_flag.wait(timeout=delay):
+                    if self._interruptible_sleep(delay):
                         # Stop flag was set during wait
                         self.logger.info("Worker stop requested during delay")
                         break
 
                 except requests.HTTPError as e:
+                    error_msg = self._format_http_error(e)
+
+                    if self._is_critical_error(e):
+                        self.logger.critical(
+                            "CRITICAL ERROR DETECTED: %s - Stopping worker immediately to prevent escalating sanctions from DeviantArt",
+                            error_msg,
+                        )
+                        self.repo.mark_failed(deviationid, error_msg)
+                        with self._stats_lock:
+                            self._worker_stats["errors"] += 1
+                            self._worker_stats["last_error"] = error_msg
+                            self._worker_stats["consecutive_failures"] += 1
+                        break
+
                     response = getattr(e, "response", None)
                     status_code = getattr(response, "status_code", None)
 
@@ -276,28 +236,7 @@ class MassFaveService:
                         and 400 <= status_code < 500
                         and status_code != 429
                     ):
-                        error_payload: object | None
-                        try:
-                            error_payload = response.json()
-                        except Exception:  # noqa: BLE001
-                            error_payload = None
-
-                        error_desc = None
-                        error_code = None
-                        error_name = None
-                        if isinstance(error_payload, dict):
-                            error_desc = error_payload.get("error_description")
-                            error_code = error_payload.get("error_code")
-                            error_name = error_payload.get("error")
-
-                        error_parts = [f"HTTP {status_code}"]
-                        if error_name:
-                            error_parts.append(str(error_name))
-                        if error_code is not None:
-                            error_parts.append(f"code={error_code}")
-                        if error_desc:
-                            error_parts.append(str(error_desc))
-                        error_msg = ": ".join([error_parts[0], " ".join(error_parts[1:])])
+                        error_code = self._get_error_code(e)
 
                         # Special case: DA rate limit for faving returns HTTP 400
                         # invalid_request with error_code=4. This is retryable, but

@@ -355,6 +355,7 @@ class DeviationCommentLogStatus(str, Enum):
 
     SENT = "sent"
     FAILED = "failed"
+    DELETED = "deleted"  # Deviation was deleted on DeviantArt
 
 
 @dataclass

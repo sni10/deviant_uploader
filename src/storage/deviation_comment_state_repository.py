@@ -10,32 +10,6 @@ from .deviation_comment_tables import deviation_comment_state
 class DeviationCommentStateRepository(BaseRepository):
     """Provides persistence for comment collector state."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "execute"):
-            try:
-                return self.conn.execute(statement)
-            except TypeError:
-                pass
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row."""
-        result = self._execute_core(statement)
-
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     def get_state(self, key: str) -> str | None:
         """Get state value by key.
 
@@ -67,5 +41,4 @@ class DeviationCommentStateRepository(BaseRepository):
                 set_={"value": value, "updated_at": func.current_timestamp()},
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)

@@ -8,8 +8,7 @@ from ..base_repository import DBConnection
 class DatabaseAdapter(Protocol):
     """Protocol defining the interface for database adapters.
     
-    This protocol enables switching between different database backends
-    (SQLite, PostgreSQL via SQLAlchemy) without changing repository code.
+    This protocol defines adapter capabilities for the storage layer.
     
     Each adapter is responsible for:
     - Initializing the database schema

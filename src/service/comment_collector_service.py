@@ -15,10 +15,12 @@ from ..storage.deviation_comment_queue_repository import (
 from ..storage.deviation_comment_state_repository import (
     DeviationCommentStateRepository,
 )
+from .api_pagination_helper import APIPaginationHelper
+from .base_service import BaseService
 from .http_client import DeviantArtHttpClient
 
 
-class CommentCollectorService:
+class CommentCollectorService(BaseService):
     """Collect deviations from feeds for auto-commenting."""
 
     WATCH_FEED_URL = "https://www.deviantart.com/api/v1/oauth2/browse/deviantsyouwatch"
@@ -33,13 +35,15 @@ class CommentCollectorService:
         token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
     ) -> None:
+        if http_client is None:
+            http_client = DeviantArtHttpClient(
+                logger=logger, token_repo=token_repo
+            )
+        super().__init__(logger, token_repo, http_client)
+
         self.queue_repo = queue_repo
         self.log_repo = log_repo
         self.state_repo = state_repo
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
 
     def collect_from_watch_feed(
         self, access_token: str, max_pages: int = 5
@@ -110,7 +114,6 @@ class CommentCollectorService:
             except ValueError:
                 self.logger.warning("Invalid offset stored for %s: %s", offset_key, stored_offset)
 
-        pages = 0
         deviations_added = 0
         limit = 50
         commented_ids = self.log_repo.get_commented_deviationids()
@@ -122,73 +125,58 @@ class CommentCollectorService:
             offset,
         )
 
-        while pages < max_pages:
-            params = {
-                "access_token": access_token,
-                "limit": limit,
-                "offset": offset,
-                "mature_content": "true",
-            }
+        pagination = APIPaginationHelper(self.http_client, self.logger)
+
+        def process_item(item: dict) -> bool | None:
+            """Normalize and enqueue deviation, returning True when added."""
+            normalized = self._normalize_deviation(
+                item, source, int(time.time())
+            )
+            if not normalized:
+                return None
+
+            deviationid = normalized["deviationid"]
+            if deviationid in commented_ids:
+                return None
 
             try:
-                response = self.http_client.get(url, params=params, timeout=30)
-                try:
-                    data = response.json() or {}
-                except ValueError as e:
-                    self.logger.error("Feed response JSON decode failed: %s", e)
-                    break
-            except requests.RequestException as e:
-                self.logger.error("Comment feed fetch failed: %s", e)
-                break
-
-            if not isinstance(data, dict):
-                self.logger.error("Feed response is not a dict: %r", data)
-                break
-
-            results = data.get("results", [])
-            current_time = int(time.time())
-
-            for item in results:
-                normalized = self._normalize_deviation(item, source, current_time)
-                if not normalized:
-                    continue
-
-                deviationid = normalized["deviationid"]
-                if deviationid in commented_ids:
-                    continue
-
-                try:
-                    self.queue_repo.add_deviation(**normalized)
-                    deviations_added += 1
-                except Exception as e:  # noqa: BLE001
-                    self.logger.warning(
-                        "Failed to add deviation %s to queue: %s",
-                        deviationid,
-                        e,
-                    )
-
-            pages += 1
-
-            has_more = bool(data.get("has_more"))
-            next_offset = data.get("next_offset")
-
-            if next_offset is not None:
-                try:
-                    offset = int(next_offset)
-                except (TypeError, ValueError):
-                    offset += limit
-                self.state_repo.set_state(offset_key, str(offset))
-
-            if not has_more:
-                break
-
-            if pages < max_pages:
-                delay = self.http_client.get_recommended_delay()
-                self.logger.debug(
-                    "Waiting %s seconds before next comment feed request",
-                    delay,
+                self.queue_repo.add_deviation(**normalized)
+                return True
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(
+                    "Failed to add deviation %s to queue: %s",
+                    deviationid,
+                    e,
                 )
-                time.sleep(delay)
+                return None
+
+        def update_state(page_info: dict[str, object]) -> None:
+            """Persist pagination offset after each page."""
+            next_offset = page_info.get("next_offset")
+            if next_offset is not None:
+                self.state_repo.set_state(offset_key, str(page_info["offset"]))
+
+        try:
+            for _ in pagination.paginate(
+                url=url,
+                access_token=access_token,
+                limit=limit,
+                max_pages=max_pages,
+                additional_params={"mature_content": "true"},
+                process_item=process_item,
+                initial_offset=offset,
+                page_callback=update_state,
+            ):
+                deviations_added += 1
+        except ValueError as e:
+            self.logger.error("Feed response JSON decode failed: %s", e)
+        except AttributeError as e:
+            self.logger.error("Feed response is not a dict: %s", e)
+        except requests.RequestException as e:
+            self.logger.error("Comment feed fetch failed: %s", e)
+
+        pages = pagination.pages_fetched
+        offset = pagination.last_offset if pagination.last_offset is not None else offset
 
         self.logger.info(
             "Comment collection completed: source=%s, pages=%s, deviations=%s",

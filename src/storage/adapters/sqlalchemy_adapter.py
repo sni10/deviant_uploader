@@ -10,18 +10,14 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 
 from ..base_repository import DBConnection
-from ..models import Base
-from ..feed_tables import metadata as feed_metadata
-from ..profile_message_tables import metadata as profile_message_metadata
-from ..deviation_comment_tables import metadata as deviation_comment_metadata
+from ..schema_registry import iter_metadata
 
 
 class SQLAlchemyConnection:
     """Wrapper around SQLAlchemy Session implementing DBConnection protocol.
-    
+
     This wrapper makes SQLAlchemy sessions compatible with the DBConnection
-    protocol expected by repositories, allowing repositories to work seamlessly
-    with both SQLite and PostgreSQL backends.
+    protocol expected by repositories.
     """
     
     def __init__(self, session: Session):
@@ -75,11 +71,7 @@ class SQLAlchemyConnection:
 
 
 class SQLAlchemyAdapter:
-    """Database adapter for PostgreSQL backend using SQLAlchemy.
-    
-    This adapter provides PostgreSQL support through SQLAlchemy ORM,
-    implementing the DatabaseAdapter protocol for seamless backend switching.
-    """
+    """Database adapter for PostgreSQL backend using SQLAlchemy."""
     
     def __init__(self, database_url: str):
         """Initialize SQLAlchemy adapter.
@@ -135,17 +127,8 @@ class SQLAlchemyAdapter:
             conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {self.schema}"))
             conn.execute(text(f"SET search_path TO {self.schema}"))
 
-            # Create all tables defined in ORM models
-            Base.metadata.create_all(bind=conn)
-
-            # Create all tables defined in Core metadata (feed tables)
-            feed_metadata.create_all(bind=conn)
-
-            # Create all tables defined in Core metadata (profile message tables)
-            profile_message_metadata.create_all(bind=conn)
-
-            # Create all tables defined in Core metadata (deviation comment tables)
-            deviation_comment_metadata.create_all(bind=conn)
+            for metadata in iter_metadata():
+                metadata.create_all(bind=conn)
     
     def get_connection(self) -> DBConnection:
         """Create and return a new SQLAlchemy session wrapped as DBConnection.
