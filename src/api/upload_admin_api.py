@@ -10,7 +10,8 @@ from ..service.uploader import UploaderService
 from ..storage import (
     get_connection,
     DeviationRepository,
-    GalleryRepository
+    GalleryRepository,
+    OAuthTokenRepository,
 )
 from ..storage.preset_repository import PresetRepository
 from ..domain.models import UploadPreset
@@ -40,7 +41,8 @@ def create_upload_admin_app():
         deviation_repo = DeviationRepository(conn)
         gallery_repo = GalleryRepository(conn)
         preset_repo = PresetRepository(conn)
-        auth_service = AuthService(conn)
+        token_repo = OAuthTokenRepository(conn)
+        auth_service = AuthService(token_repo, logger)
         uploader_service = UploaderService(
             deviation_repo,
             gallery_repo,

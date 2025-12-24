@@ -1,8 +1,4 @@
-"""SQLAlchemy ORM models for PostgreSQL backend.
-
-These models mirror the SQLite schema defined in database.py, enabling
-seamless switching between SQLite and PostgreSQL backends.
-"""
+"""SQLAlchemy ORM models for PostgreSQL backend."""
 
 from datetime import datetime
 from sqlalchemy import (
@@ -76,7 +72,7 @@ class Gallery(Base):
     name = Column(String, nullable=False)
     parent = Column(String)
     size = Column(Integer)
-    sync_enabled = Column(Integer, nullable=False, default=1)  # SQLite uses INTEGER for boolean
+    sync_enabled = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

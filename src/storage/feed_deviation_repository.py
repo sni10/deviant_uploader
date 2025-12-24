@@ -14,42 +14,6 @@ class FeedDeviationRepository(BaseRepository):
     - feed_deviations: Queue of deviations from feed for auto-faving
     """
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        # Preferred path: use connection wrapper `.execute()`.
-        # This keeps thread-safety guarantees (lock) and schema/search_path setup.
-        if hasattr(self.conn, "execute"):
-            try:
-                return self.conn.execute(statement)
-            except TypeError:
-                # Fallback for legacy adapters that expect SQL string
-                pass
-
-        # Legacy fallback (kept only for backward compatibility)
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row.
-
-        This method provides compatibility between SQLAlchemy Result objects
-        and sqlite3.Cursor objects.
-        """
-        result = self._execute_core(statement)
-
-        # SQLAlchemy Result
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        # sqlite3.Cursor
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     # ========== State Management ==========
 
     def get_state(self, key: str) -> str | None:
@@ -82,8 +46,7 @@ class FeedDeviationRepository(BaseRepository):
             )
         )
 
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     # ========== Deviation Queue Management ==========
 
@@ -114,8 +77,7 @@ class FeedDeviationRepository(BaseRepository):
             },
         )
 
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def get_one_pending(self) -> dict | None:
         """Get one pending deviation (newest by timestamp).
@@ -165,8 +127,7 @@ class FeedDeviationRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def mark_failed(self, deviationid: str, error: str) -> None:
         """Mark deviation as permanently failed.
@@ -185,8 +146,7 @@ class FeedDeviationRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def bump_attempt(self, deviationid: str, error: str) -> None:
         """Increment attempt counter (keeps status as pending).
@@ -204,8 +164,7 @@ class FeedDeviationRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def get_stats(self) -> dict:
         """Get queue statistics.
@@ -213,7 +172,6 @@ class FeedDeviationRepository(BaseRepository):
         Returns:
             Dictionary with counts: {pending, faved, failed, total}
         """
-        # Separate queries for SQLite compatibility (no FILTER support in older versions)
         stmt_pending = select(func.count()).select_from(feed_deviations).where(
             feed_deviations.c.status == "pending"
         )
@@ -251,13 +209,8 @@ class FeedDeviationRepository(BaseRepository):
         else:
             stmt = delete(feed_deviations)
 
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        # Get rowcount
-        if hasattr(result, 'rowcount'):
-            return result.rowcount
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)
 
     def delete_deviation(self, deviationid: str) -> int:
         """Delete a deviation from the queue.
@@ -272,12 +225,8 @@ class FeedDeviationRepository(BaseRepository):
             Number of deleted rows.
         """
         stmt = delete(feed_deviations).where(feed_deviations.c.deviationid == deviationid)
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        if hasattr(result, "rowcount"):
-            return result.rowcount
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)
 
     def reset_failed_to_pending(self) -> int:
         """Reset all failed deviations back to pending status.
@@ -295,10 +244,5 @@ class FeedDeviationRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        # Get rowcount
-        if hasattr(result, 'rowcount'):
-            return result.rowcount
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)

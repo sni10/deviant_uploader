@@ -16,14 +16,14 @@ _initialized: bool = False
 
 
 def init_database(db_path: str | Path) -> None:
-    """Legacy SQLite initializer (removed).
+    """Legacy initializer (removed).
 
     The project is PostgreSQL-only. This function exists only so that any
     remaining legacy callsites fail loudly.
     """
 
     raise RuntimeError(
-        "SQLite backend has been deprecated and removed. "
+        "Legacy backend has been removed. "
         "Configure PostgreSQL via DATABASE_URL/DB_* and use get_connection()."
     )
 

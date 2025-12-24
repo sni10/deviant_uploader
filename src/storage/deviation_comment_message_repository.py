@@ -10,32 +10,6 @@ from ..domain.models import DeviationCommentMessage
 class DeviationCommentMessageRepository(BaseRepository):
     """Provides persistence for deviation comment templates."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "execute"):
-            try:
-                return self.conn.execute(statement)
-            except TypeError:
-                pass
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row."""
-        result = self._execute_core(statement)
-
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     def create_message(self, title: str, body: str) -> int:
         """Create new deviation comment template.
 
@@ -49,13 +23,9 @@ class DeviationCommentMessageRepository(BaseRepository):
         stmt = insert(deviation_comment_messages).values(
             title=title, body=body, is_active=True
         )
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        if hasattr(result, "inserted_primary_key"):
-            return result.inserted_primary_key[0]
-
-        return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return self._insert_returning_id(
+            stmt, returning_col=deviation_comment_messages.c.message_id
+        )
 
     def get_message_by_id(self, message_id: int) -> DeviationCommentMessage | None:
         """Get message template by ID.
@@ -191,8 +161,7 @@ class DeviationCommentMessageRepository(BaseRepository):
             .values(**values)
         )
 
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def delete_message(self, message_id: int) -> None:
         """Delete message template.
@@ -203,5 +172,4 @@ class DeviationCommentMessageRepository(BaseRepository):
         stmt = delete(deviation_comment_messages).where(
             deviation_comment_messages.c.message_id == message_id
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)

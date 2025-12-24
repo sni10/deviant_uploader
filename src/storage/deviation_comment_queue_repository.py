@@ -14,32 +14,6 @@ from ..domain.models import (
 class DeviationCommentQueueRepository(BaseRepository):
     """Provides persistence for deviation comment queue."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "execute"):
-            try:
-                return self.conn.execute(statement)
-            except TypeError:
-                pass
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row."""
-        result = self._execute_core(statement)
-
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     def add_deviation(
         self,
         deviationid: str,
@@ -97,8 +71,7 @@ class DeviationCommentQueueRepository(BaseRepository):
             },
         )
 
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def get_one_pending(self) -> dict[str, object] | None:
         """Get one pending deviation (newest by timestamp).
@@ -233,8 +206,7 @@ class DeviationCommentQueueRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def mark_failed(self, deviationid: str, error: str) -> None:
         """Mark deviation as permanently failed.
@@ -253,8 +225,7 @@ class DeviationCommentQueueRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def bump_attempt(self, deviationid: str, error: str) -> None:
         """Increment attempt counter (keeps status as pending).
@@ -272,8 +243,7 @@ class DeviationCommentQueueRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def reset_failed_to_pending(self) -> int:
         """Reset all failed deviations back to pending status.
@@ -294,12 +264,8 @@ class DeviationCommentQueueRepository(BaseRepository):
                 updated_at=func.current_timestamp(),
             )
         )
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        if hasattr(result, "rowcount"):
-            return result.rowcount
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)
 
     def clear_queue(self, status: DeviationCommentQueueStatus | None = None) -> int:
         """Clear queue (optionally by status).
@@ -317,12 +283,8 @@ class DeviationCommentQueueRepository(BaseRepository):
         else:
             stmt = delete(deviation_comment_queue)
 
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        if hasattr(result, "rowcount"):
-            return result.rowcount
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)
 
     def remove_by_ids(self, deviationids: list[str]) -> int:
         """Remove queue entries by deviation IDs.
@@ -339,12 +301,8 @@ class DeviationCommentQueueRepository(BaseRepository):
         stmt = delete(deviation_comment_queue).where(
             deviation_comment_queue.c.deviationid.in_(deviationids)
         )
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        if hasattr(result, "rowcount"):
-            return result.rowcount
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)
 
     def get_stats(self) -> dict[str, int]:
         """Get queue statistics.

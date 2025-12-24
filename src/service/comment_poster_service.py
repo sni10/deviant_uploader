@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import random
-import threading
-import time
 from logging import Logger
 from typing import Optional
 
 import requests
 
-from ..config.settings import get_config
 from ..domain.models import DeviationCommentLogStatus, DeviationCommentMessage
 from ..storage.deviation_comment_log_repository import (
     DeviationCommentLogRepository,
@@ -23,9 +20,10 @@ from ..storage.deviation_comment_queue_repository import (
 )
 from .http_client import DeviantArtHttpClient
 from .message_randomizer import randomize_template
+from .base_worker_service import BaseWorkerService
 
 
-class CommentPosterService:
+class CommentPosterService(BaseWorkerService):
     """Post comments for deviations from the queue."""
 
     COMMENT_URL = (
@@ -33,6 +31,7 @@ class CommentPosterService:
         "{deviationid}"
     )
     FAVE_URL = "https://www.deviantart.com/api/v1/oauth2/collections/fave"
+    DEVIATION_URL = "https://www.deviantart.com/api/v1/oauth2/deviation/{deviationid}"
     MAX_CONSECUTIVE_FAILURES = 5
     MAX_ATTEMPTS = 3
 
@@ -44,43 +43,39 @@ class CommentPosterService:
         logger: Logger,
         token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
-        config: Optional[object] = None,
     ) -> None:
+        # Call BaseWorkerService.__init__, which calls BaseService.__init__
+        # This initializes logger, http_client, and config property
+        super().__init__(logger, token_repo, http_client)
+
         self.message_repo = message_repo
         self.queue_repo = queue_repo
         self.log_repo = log_repo
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
-        self._config = config
 
-        self._worker_thread: Optional[threading.Thread] = None
-        self._worker_running = False
-        self._stop_flag = threading.Event()
-        self._worker_stats = {
-            "processed": 0,
-            "errors": 0,
-            "last_error": None,
-            "consecutive_failures": 0,
-        }
-        self._stats_lock = threading.Lock()
+    def _validate_worker_start(self) -> dict[str, object]:
+        """Validate conditions before starting worker.
 
-    @property
-    def config(self):
-        """Lazy-load config if not provided during initialization."""
-        if self._config is None:
-            self._config = get_config()
-        return self._config
+        Returns:
+            Dictionary with validation result:
+            - If valid: {"valid": True}
+            - If invalid: {"valid": False, "message": "error description"}
+        """
+        queue_stats = self.queue_repo.get_stats()
+        if queue_stats.get("pending", 0) == 0:
+            return {"valid": False, "message": "Queue is empty. Collect first."}
 
-    def _is_worker_alive(self) -> bool:
-        """Return True if the background worker thread is alive."""
-        return bool(self._worker_thread and self._worker_thread.is_alive())
+        # Note: template_id validation moved to start_worker override
+        # since it's a parameter-specific check
+        active_messages = self.message_repo.get_active_messages()
+        if not active_messages:
+            return {"valid": False, "message": "No active templates found."}
+
+        return {"valid": True}
 
     def start_worker(
         self, access_token: str, template_id: int | None = None
     ) -> dict[str, object]:
-        """Start background worker thread.
+        """Start background worker thread with optional template selection.
 
         Args:
             access_token: OAuth access token for posting comments.
@@ -89,87 +84,33 @@ class CommentPosterService:
         Returns:
             Status dictionary: {success, message}.
         """
-        if self._is_worker_alive():
-            return {"success": False, "message": "Worker already running"}
-
-        queue_stats = self.queue_repo.get_stats()
-        if queue_stats.get("pending", 0) == 0:
-            return {"success": False, "message": "Queue is empty. Collect first."}
-
+        # Additional validation for template_id parameter
         if template_id is not None:
             template = self.message_repo.get_message_by_id(template_id)
             if template is None:
                 return {"success": False, "message": "Template not found"}
             if not template.is_active:
                 return {"success": False, "message": "Template is not active"}
-        else:
-            active_messages = self.message_repo.get_active_messages()
-            if not active_messages:
-                return {
-                    "success": False,
-                    "message": "No active templates found.",
-                }
 
-        self._stop_flag.clear()
-        with self._stats_lock:
-            self._worker_stats = {
-                "processed": 0,
-                "errors": 0,
-                "last_error": None,
-                "consecutive_failures": 0,
-            }
-
-        self._worker_thread = threading.Thread(
-            target=self._worker_loop,
-            args=(access_token, template_id),
-            daemon=True,
-        )
-        self._worker_running = True
-        self._worker_thread.start()
-
-        self.logger.info("Comment worker started")
-        return {"success": True, "message": "Worker started"}
-
-    def stop_worker(self) -> dict[str, object]:
-        """Stop background worker thread.
-
-        Returns:
-            Status dictionary: {success, message}.
-        """
-        if not self._is_worker_alive():
-            self._worker_running = False
-            return {"success": False, "message": "Worker not running"}
-
-        self._stop_flag.set()
-        if self._worker_thread:
-            self._worker_thread.join(timeout=10)
-
-        self._worker_running = self._is_worker_alive()
-
-        if self._worker_running:
-            self.logger.warning("Worker stop requested but still running")
-            return {"success": True, "message": "Stop requested"}
-
-        self.logger.info("Comment worker stopped")
-        return {"success": True, "message": "Worker stopped"}
+        # Call base class start_worker
+        return super().start_worker(access_token, template_id)
 
     def get_worker_status(self) -> dict[str, object]:
-        """Get worker and queue status."""
-        running = self._is_worker_alive()
-        if not running:
-            self._worker_running = False
+        """Get worker and queue status.
 
+        Extends base worker status with queue-specific statistics.
+
+        Returns:
+            Dictionary with worker status including queue_stats
+        """
+        # Get base worker status from BaseWorkerService
+        status = super().get_worker_status()
+
+        # Add queue-specific statistics
         queue_stats = self.queue_repo.get_stats()
+        status["queue_stats"] = queue_stats
 
-        with self._stats_lock:
-            return {
-                "running": running,
-                "processed": self._worker_stats["processed"],
-                "errors": self._worker_stats["errors"],
-                "last_error": self._worker_stats["last_error"],
-                "consecutive_failures": self._worker_stats["consecutive_failures"],
-                "queue_stats": queue_stats,
-            }
+        return status
 
     def _select_template(self, template_id: int | None):
         """Select a template by ID or choose a random active one."""
@@ -189,22 +130,53 @@ class CommentPosterService:
         """Render template body with randomized synonyms."""
         return randomize_template(body)
 
-    def _get_broadcast_delay(self) -> int:
-        """Generate random delay for broadcasting (in seconds).
+    def _check_deviation_exists(
+        self, access_token: str, deviationid: str
+    ) -> bool:
+        """
+        Check if deviation exists on DeviantArt before commenting.
+
+        Args:
+            access_token: OAuth access token
+            deviationid: Deviation ID to check
 
         Returns:
-            Random delay in seconds between min and max configured values
+            True if deviation exists (HTTP 200), False if deleted (HTTP 500/404)
         """
-        min_delay = self.config.broadcast_min_delay_seconds
-        max_delay = self.config.broadcast_max_delay_seconds
-        delay = random.randint(min_delay, max_delay)
-        self.logger.debug(
-            "Generated broadcast delay: %d seconds (range: %d-%d)",
-            delay,
-            min_delay,
-            max_delay,
-        )
-        return delay
+        try:
+            url = self.DEVIATION_URL.format(deviationid=deviationid)
+            self.http_client.get(
+                url, params={"access_token": access_token}, timeout=30
+            )
+            self.logger.debug(
+                "Deviation %s exists and is accessible", deviationid
+            )
+            return True
+        except requests.HTTPError as e:
+            response = getattr(e, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code in (404, 500):
+                self.logger.debug(
+                    "Deviation %s appears to be deleted (HTTP %s)",
+                    deviationid,
+                    status_code,
+                )
+                return False
+            # Other HTTP errors - treat as temporary, allow retry
+            self.logger.warning(
+                "Deviation check failed with HTTP %s for %s, treating as accessible",
+                status_code,
+                deviationid,
+            )
+            return True
+        except Exception as e:  # noqa: BLE001
+            # Network errors, timeouts - treat as temporary, allow retry
+            self.logger.warning(
+                "Deviation check failed for %s: %s, treating as accessible",
+                deviationid,
+                str(e),
+            )
+            return True
 
     def _post_comment(
         self,
@@ -286,37 +258,6 @@ class CommentPosterService:
         # Auto-fave deviation after successful comment
         self._fave_deviation(access_token, deviationid)
 
-    def _format_http_error(self, error: requests.HTTPError) -> str:
-        """Format HTTP error with response details when available."""
-        response = getattr(error, "response", None)
-        if response is None:
-            return str(error)
-
-        status_code = getattr(response, "status_code", None)
-        error_payload: object | None
-        try:
-            error_payload = response.json()
-        except Exception:  # noqa: BLE001
-            error_payload = None
-
-        error_desc = None
-        error_code = None
-        error_name = None
-        if isinstance(error_payload, dict):
-            error_desc = error_payload.get("error_description")
-            error_code = error_payload.get("error_code")
-            error_name = error_payload.get("error")
-
-        parts = [f"HTTP {status_code}"]
-        if error_name:
-            parts.append(str(error_name))
-        if error_code is not None:
-            parts.append(f"code={error_code}")
-        if error_desc:
-            parts.append(str(error_desc))
-
-        return ": ".join([parts[0], " ".join(parts[1:])]) if len(parts) > 1 else parts[0]
-
     def _is_non_retryable_http_error(self, error: requests.HTTPError) -> bool:
         """Return True for HTTP 4xx errors (excluding 429)."""
         response = getattr(error, "response", None)
@@ -325,45 +266,55 @@ class CommentPosterService:
             return status_code != 429
         return False
 
-    def _is_critical_error(self, error: requests.HTTPError) -> bool:
+    def _is_deleted_deviation_error(self, error: requests.HTTPError) -> bool:
         """
-        Check if HTTP error is critical and requires immediate worker stop.
+        Check if HTTP error indicates that deviation was deleted on DeviantArt.
         
-        Critical errors include:
-        - Spam detection by DeviantArt
-        - Account restrictions or bans
-        - Other policy violations
+        HTTP 404 and 500 errors typically mean the deviation no longer exists.
         
         Returns:
-            True if worker should stop immediately to prevent escalating sanctions.
+            True if deviation was likely deleted.
         """
         response = getattr(error, "response", None)
-        if response is None:
-            return False
+        status_code = getattr(response, "status_code", None)
+        return status_code in (404, 500)
 
-        try:
-            error_payload = response.json()
-        except Exception:  # noqa: BLE001
-            return False
-
-        if not isinstance(error_payload, dict):
-            return False
-
-        # Check error_description for spam-related keywords
-        error_desc = error_payload.get("error_description", "")
-        if isinstance(error_desc, str):
-            error_desc_lower = error_desc.lower()
-            # Spam detection
-            if "spam" in error_desc_lower:
-                return True
-            # Account restrictions
-            if "banned" in error_desc_lower or "suspended" in error_desc_lower:
-                return True
-            # Rate limit abuse (different from normal 429)
-            if "abuse" in error_desc_lower or "violation" in error_desc_lower:
-                return True
-
-        return False
+    def _handle_deleted_deviation(
+        self,
+        queue_item: dict[str, object],
+        template_id: int,
+        comment_text: str,
+        error_msg: str,
+    ) -> None:
+        """
+        Handle case when deviation was deleted on DeviantArt.
+        
+        Removes item from queue and logs with DELETED status.
+        """
+        deviationid = str(queue_item.get("deviationid"))
+        
+        # Remove from queue (deviation no longer exists)
+        self.queue_repo.remove_by_ids([deviationid])
+        self.logger.info(
+            "Deviation %s removed from queue (deleted on DeviantArt)",
+            deviationid,
+        )
+        
+        # Log as DELETED
+        self.log_repo.add_log(
+            message_id=template_id,
+            deviationid=deviationid,
+            deviation_url=queue_item.get("deviation_url"),
+            author_username=queue_item.get("author_username"),
+            comment_text=comment_text,
+            status=DeviationCommentLogStatus.DELETED,
+            error_message=error_msg,
+        )
+        
+        with self._stats_lock:
+            self._worker_stats["errors"] += 1
+            self._worker_stats["consecutive_failures"] += 1
+            self._worker_stats["last_error"] = error_msg
 
     def _handle_failure(
         self,
@@ -408,7 +359,7 @@ class CommentPosterService:
                 queue_item = self.queue_repo.get_one_pending()
                 if not queue_item:
                     delay = self.http_client.get_recommended_delay()
-                    if self._stop_flag.wait(timeout=delay):
+                    if self._interruptible_sleep(delay):
                         break
                     continue
 
@@ -425,6 +376,23 @@ class CommentPosterService:
 
                 comment_text = self._render_comment(template.body)
 
+                # Check if deviation exists before waiting for broadcast delay
+                if not self._check_deviation_exists(access_token, deviationid):
+                    # Deviation is deleted (404/500), skip without waiting
+                    error_msg = f"Deviation check failed: appears to be deleted (HTTP 404/500)"
+                    self.logger.info(
+                        "Skipping deleted deviation %s without broadcast delay",
+                        deviationid,
+                    )
+                    self._handle_deleted_deviation(
+                        queue_item,
+                        message_id,
+                        comment_text,
+                        error_msg,
+                    )
+                    # Continue to next item immediately (no delay needed for deleted deviations)
+                    continue
+
                 broadcast_delay = self._get_broadcast_delay()
                 author_username = queue_item.get("author_username", "unknown")
                 self.logger.info(
@@ -432,7 +400,7 @@ class CommentPosterService:
                     broadcast_delay,
                     author_username,
                 )
-                if self._stop_flag.wait(timeout=broadcast_delay):
+                if self._interruptible_sleep(broadcast_delay):
                     break
 
                 try:
@@ -460,12 +428,31 @@ class CommentPosterService:
                     )
 
                     delay = self.http_client.get_recommended_delay()
-                    if self._stop_flag.wait(timeout=delay):
+                    if self._interruptible_sleep(delay):
                         break
                     continue
 
                 except requests.HTTPError as e:
                     error_msg = self._format_http_error(e)
+                    
+                    # Check if deviation was deleted (HTTP 500)
+                    if self._is_deleted_deviation_error(e):
+                        self.logger.warning(
+                            "Deviation %s appears to be deleted on DeviantArt (HTTP 500): %s",
+                            deviationid,
+                            error_msg,
+                        )
+                        self._handle_deleted_deviation(
+                            queue_item,
+                            message_id,
+                            comment_text,
+                            error_msg,
+                        )
+                        # Continue to next item (no retry needed)
+                        delay = self.http_client.get_recommended_delay()
+                        if self._interruptible_sleep(delay):
+                            break
+                        continue
                     
                     # Check for critical errors that require immediate worker stop
                     if self._is_critical_error(e):
@@ -524,7 +511,7 @@ class CommentPosterService:
                     break
 
                 delay = self.http_client.get_recommended_delay()
-                if self._stop_flag.wait(timeout=delay):
+                if self._interruptible_sleep(delay):
                     break
         finally:
             self._worker_running = False

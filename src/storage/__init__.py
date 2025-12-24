@@ -1,8 +1,7 @@
 """
-Storage layer with database abstraction supporting SQLite and PostgreSQL.
+Storage layer for PostgreSQL using SQLAlchemy.
 
 Follows DDD and SOLID principles with separate repositories for each domain entity.
-Database backend is selected via DATABASE_TYPE configuration.
 """
 from .database import get_connection, get_database_adapter
 from .base_repository import BaseRepository, DBConnection
@@ -56,8 +55,7 @@ def create_repositories() -> tuple[
     This ensures all repositories use the same connection and transaction context,
     following the Unit of Work pattern.
     
-    The database backend (SQLite or PostgreSQL) is selected automatically based on
-    the DATABASE_TYPE configuration setting.
+    The database backend is PostgreSQL (SQLAlchemy).
     
     Returns:
         Tuple of (UserRepository, OAuthTokenRepository, GalleryRepository, 

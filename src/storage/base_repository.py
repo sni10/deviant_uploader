@@ -9,17 +9,14 @@ class DBConnection(Protocol):
     """Abstract database connection used by repositories.
 
     This protocol defines the minimal surface that repositories rely on.
-    It intentionally mirrors the subset of :class:`sqlite3.Connection`
-    that is used in the current codebase so the storage layer can be
-    switched to another backend (for example, SQLAlchemy/PostgreSQL)
-    without changing repository logic.
+    It mirrors the SQLAlchemy Session/Connection API used in the storage
+    layer so repositories can remain backend-agnostic at call sites.
     """
 
     def execute(self, statement: Any, parameters: Any | None = None) -> Any:
         """Execute a statement and return a result-like object.
 
-        In PostgreSQL-only mode, repositories primarily execute SQLAlchemy Core
-        statements.
+        Repositories primarily execute SQLAlchemy Core statements.
         """
 
     def commit(self) -> None:
@@ -71,6 +68,32 @@ class BaseRepository(ABC):
 
         return self._conn.execute(statement, parameters)
 
+    def _execute_core(self, statement: Any, parameters: Any | None = None) -> Any:
+        """Execute a SQLAlchemy Core statement using the connection."""
+
+        return self._execute(statement, parameters)
+
+    def _execute_and_commit(
+        self, statement: Any, parameters: Any | None = None
+    ) -> Any:
+        """Execute a statement and commit the transaction."""
+
+        result = self._execute(statement, parameters)
+        self._conn.commit()
+        return result
+
+    def _fetchone(self, statement: Any, parameters: Any | None = None) -> Any:
+        """Execute a statement and fetch one row."""
+
+        result = self._execute(statement, parameters)
+        return result.fetchone()
+
+    def _fetchall(self, statement: Any, parameters: Any | None = None) -> Any:
+        """Execute a statement and fetch all rows."""
+
+        result = self._execute(statement, parameters)
+        return result.fetchall()
+
     def _scalar(self, statement: Any, parameters: Any | None = None) -> Any:
         """Execute a statement and return scalar value.
 
@@ -78,9 +101,28 @@ class BaseRepository(ABC):
         """
 
         result = self._execute(statement, parameters)
-        if hasattr(result, "scalar_one_or_none"):
-            return result.scalar_one_or_none()
         if hasattr(result, "scalar"):
             return result.scalar()
+        row = result.fetchone()
+        return None if row is None else row[0]
+
+    def _rowcount(self, result: Any) -> int:
+        """Return rowcount from a result, if available."""
+
+        if hasattr(result, "rowcount"):
+            rowcount = result.rowcount
+            return 0 if rowcount is None else int(rowcount)
+        return 0
+
+    def _insert_returning_id(
+        self, insert_stmt: Any, returning_col: Any | None = None
+    ) -> int | None:
+        """Execute insert statement with RETURNING and return id."""
+
+        if returning_col is None:
+            raise ValueError("returning_col is required for returning id")
+
+        stmt = insert_stmt.returning(returning_col)
+        result = self._execute_and_commit(stmt)
         row = result.fetchone()
         return None if row is None else row[0]

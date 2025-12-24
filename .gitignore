@@ -87,3 +87,4 @@ upload_template.json
 /AGENTS.md
 /local_dev_examples/
 /.claude/settings.local.json
+/.claude/
