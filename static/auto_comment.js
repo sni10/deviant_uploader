@@ -499,6 +499,8 @@
             ${
               log.status === "sent"
                 ? '<span class="badge bg-success">Sent</span>'
+                : log.status === "deleted"
+                ? '<span class="badge bg-secondary">Deleted</span>'
                 : '<span class="badge bg-danger">Failed</span>'
             }
           </td>

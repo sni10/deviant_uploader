@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git pull:*)",
       "Bash(sqlite3:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(python -m pytest:*)"
     ],
     "ask": []
   },

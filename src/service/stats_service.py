@@ -1,7 +1,6 @@
 """Service for fetching and persisting deviation statistics."""
 from datetime import date
 import re
-import threading
 import time
 from logging import Logger
 from typing import Optional
@@ -15,10 +14,11 @@ from ..storage.gallery_repository import GalleryRepository
 from ..storage.stats_snapshot_repository import StatsSnapshotRepository
 from ..storage.user_stats_snapshot_repository import UserStatsSnapshotRepository
 from ..storage.deviation_metadata_repository import DeviationMetadataRepository
+from .base_worker_service import BaseWorkerService
 from .http_client import DeviantArtHttpClient
 
 
-class StatsService:
+class StatsService(BaseWorkerService):
     """Coordinates DeviantArt stats collection."""
 
     BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
@@ -35,29 +35,17 @@ class StatsService:
         http_client: Optional[DeviantArtHttpClient] = None,
         gallery_repository: Optional[GalleryRepository] = None,
     ) -> None:
+        if http_client is None:
+            http_client = DeviantArtHttpClient(logger=logger, token_repo=token_repo)
+
+        super().__init__(logger, token_repo, http_client)
+
         self.deviation_stats_repo = deviation_stats_repository
         self.stats_snapshot_repo = stats_snapshot_repository
         self.user_stats_snapshot_repo = user_stats_snapshot_repository
         self.deviation_metadata_repo = deviation_metadata_repository
         self.deviation_repository = deviation_repository
         self.gallery_repo = gallery_repository
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
-
-        # Worker state
-        self._worker_thread: Optional[threading.Thread] = None
-        self._worker_running = False
-        self._stop_flag = threading.Event()
-        self._stats_lock = threading.Lock()
-        self._worker_stats = {
-            "processed_galleries": 0,
-            "processed_deviations": 0,
-            "errors": 0,
-            "last_error": None,
-            "current_gallery": None,
-        }
 
     @staticmethod
     def _slugify_title(title: str) -> str:
@@ -735,82 +723,50 @@ class StatsService:
 
     # ========== Worker Methods ==========
 
-    def start_worker(self, access_token: str, username: Optional[str] = None) -> dict:
-        """Start background worker thread for stats sync.
-
-        Args:
-            access_token: OAuth access token for API calls
-            username: Optional DeviantArt username for gallery sync
+    def _validate_worker_start(self) -> dict[str, object]:
+        """Validate conditions before starting worker.
 
         Returns:
-            Status dictionary: {success, message}
+            Dictionary with validation result:
+            - If valid: {"valid": True}
+            - If invalid: {"valid": False, "message": "error description"}
         """
-        if self._worker_running:
-            return {"success": False, "message": "Worker already running"}
+        if self.gallery_repo is None:
+            return {"valid": False, "message": "Gallery repository not configured"}
 
-        if not self.gallery_repo:
-            return {"success": False, "message": "Gallery repository not configured"}
-
-        self._stop_flag.clear()
-        with self._stats_lock:
-            self._worker_stats = {
-                "processed_galleries": 0,
-                "processed_deviations": 0,
-                "errors": 0,
-                "last_error": None,
-                "current_gallery": None,
-            }
-
-        self._worker_thread = threading.Thread(
-            target=self._worker_loop,
-            args=(access_token, username),
-            daemon=True,
-        )
-        self._worker_running = True
-        self._worker_thread.start()
-
-        self.logger.info("Stats sync worker thread started")
-        return {"success": True, "message": "Worker started"}
-
-    def stop_worker(self) -> dict:
-        """Stop background worker thread.
-
-        Returns:
-            Status dictionary: {success, message}
-        """
-        if not self._worker_running:
-            return {"success": False, "message": "Worker not running"}
-
-        self.logger.info("Stopping stats sync worker...")
-        self._stop_flag.set()
-        if self._worker_thread:
-            self._worker_thread.join(timeout=10)
-
-        self._worker_running = False
-        self.logger.info("Stats sync worker thread stopped")
-        return {"success": True, "message": "Worker stopped"}
+        return {"valid": True}
 
     def get_worker_status(self) -> dict:
         """Get worker status and statistics.
 
         Returns:
-            Dictionary with: {running, processed_galleries, processed_deviations,
-                            errors, last_error, current_gallery}
+            Dictionary with standard worker status fields plus:
+            - processed_galleries: int
+            - processed_deviations: int
+            - current_gallery: str | None
         """
+        status = super().get_worker_status()
         with self._stats_lock:
-            return {
-                "running": self._worker_running,
-                "processed_galleries": self._worker_stats["processed_galleries"],
-                "processed_deviations": self._worker_stats["processed_deviations"],
-                "errors": self._worker_stats["errors"],
-                "last_error": self._worker_stats["last_error"],
-                "current_gallery": self._worker_stats["current_gallery"],
-            }
+            status["processed_galleries"] = self._worker_stats.get(
+                "processed_galleries", 0
+            )
+            status["processed_deviations"] = self._worker_stats.get(
+                "processed_deviations", 0
+            )
+            status["current_gallery"] = self._worker_stats.get(
+                "current_gallery"
+            )
+        return status
 
     def _worker_loop(self, access_token: str, username: Optional[str]) -> None:
         """Background worker loop for syncing all enabled galleries."""
         self.logger.info("Stats sync worker loop started")
         try:
+            with self._stats_lock:
+                self._worker_stats.setdefault("processed_galleries", 0)
+                self._worker_stats.setdefault("processed_deviations", 0)
+                self._worker_stats.setdefault("current_gallery", None)
+
             # Get all galleries with sync_enabled=True
             galleries = self.gallery_repo.get_sync_enabled_galleries()
             total_galleries = len(galleries)
@@ -847,6 +803,7 @@ class StatsService:
                     with self._stats_lock:
                         self._worker_stats["processed_galleries"] += 1
                         self._worker_stats["processed_deviations"] += synced_count
+                        self._worker_stats["processed"] += synced_count
 
                     self.logger.info(
                         "Gallery %s synced: %d deviations",

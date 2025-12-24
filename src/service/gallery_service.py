@@ -7,17 +7,19 @@ This module provides functionality to:
 - Retrieve gallery information by various criteria
 """
 
-import time
-import requests
-from typing import Optional
 from logging import Logger
+from typing import Optional
+
+import requests
 
 from ..domain.models import Gallery
 from ..storage import GalleryRepository
+from .api_pagination_helper import APIPaginationHelper
+from .base_service import BaseService
 from .http_client import DeviantArtHttpClient
 
 
-class GalleryService:
+class GalleryService(BaseService):
     """
     Service for managing DeviantArt gallery folders.
     
@@ -45,11 +47,12 @@ class GalleryService:
             token_repo: OAuth token repository for automatic token cleanup
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
+        if http_client is None:
+            http_client = DeviantArtHttpClient(
+                logger=logger, token_repo=token_repo
+            )
+        super().__init__(logger, token_repo, http_client)
         self.gallery_repository = gallery_repository
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
     
     def fetch_galleries(
         self, 
@@ -76,50 +79,39 @@ class GalleryService:
         url = f"{self.BASE_URL}/gallery/folders"
         
         params = {
-            "access_token": access_token,
             "calculate_size": "true" if calculate_size else "false",
             "filter_empty_folder": "true" if filter_empty else "false",
-            "limit": 50
         }
         
         if username:
             params["username"] = username
         
-        all_galleries = []
-        offset = 0
-        has_more = True
+        all_galleries: list[dict] = []
         
         self.logger.info("Fetching galleries from DeviantArt API...")
-        
-        while has_more:
-            params["offset"] = offset
-            
-            try:
-                response = self.http_client.get(url, params=params)
-                data = response.json()
-                
-                if "results" in data:
-                    all_galleries.extend(data["results"])
-                    self.logger.info(f"Fetched {len(data['results'])} galleries (offset: {offset})")
-                
-                has_more = data.get("has_more", False)
-                next_offset = data.get("next_offset")
-                
-                if has_more and next_offset is not None:
-                    offset = next_offset
-                    # Rate limiting: use recommended delay from HTTP client
-                    delay = self.http_client.get_recommended_delay()
-                    self.logger.debug(
-                        "Waiting %s seconds before next galleries page request",
-                        delay,
-                    )
-                    time.sleep(delay)
-                else:
-                    has_more = False
-                    
-            except requests.RequestException as e:
-                self.logger.error(f"Failed to fetch galleries: {e}")
-                raise
+
+        pagination = APIPaginationHelper(self.http_client, self.logger)
+
+        def log_page(page_info: dict[str, object]) -> None:
+            """Log page fetch details."""
+            self.logger.info(
+                "Fetched %d galleries (page %d)",
+                page_info.get("results_count", 0),
+                page_info.get("page", 0),
+            )
+
+        try:
+            for gallery in pagination.paginate(
+                url=url,
+                access_token=access_token,
+                limit=50,
+                additional_params=params,
+                page_callback=log_page,
+            ):
+                all_galleries.append(gallery)
+        except requests.RequestException as e:
+            self.logger.error(f"Failed to fetch galleries: {e}")
+            raise
         
         self.logger.info(f"Total galleries fetched: {len(all_galleries)}")
         return all_galleries

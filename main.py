@@ -52,7 +52,12 @@ def main():
     
     # Initialize services with proper dependency injection
     auth_service = AuthService(token_repo, logger)
-    uploader_service = UploaderService(deviation_repo, gallery_repo, auth_service, logger)
+    uploader_service = UploaderService(
+        deviation_repo,
+        gallery_repo,
+        auth_service,
+        logger=logger,
+    )
     
     # Ensure authentication
     logger.info("Checking authentication...")

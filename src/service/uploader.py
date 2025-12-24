@@ -6,17 +6,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
 import requests
 
-from ..config import get_config
 from ..domain.models import Deviation, UploadStatus, UploadPreset
 from ..storage import DeviationRepository, GalleryRepository
 from ..storage.preset_repository import PresetRepository
 from .auth_service import AuthService
+from .base_service import BaseService
 from .http_client import DeviantArtHttpClient
 
 
-class UploaderService:
+class UploaderService(BaseService):
     """
     Service for uploading images to DeviantArt.
     
@@ -49,15 +50,16 @@ class UploaderService:
             token_repo: OAuth token repository for automatic token cleanup
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
-        self.config = get_config()
+        resolved_logger = logger or logging.getLogger(__name__)
+        if http_client is None:
+            http_client = DeviantArtHttpClient(
+                logger=resolved_logger, token_repo=token_repo
+            )
+        super().__init__(resolved_logger, token_repo, http_client)
         self.deviation_repository = deviation_repository
         self.gallery_repository = gallery_repository
         self.auth_service = auth_service
         self.preset_repository = preset_repository
-        self.logger = logger or logging.getLogger(__name__)
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=self.logger, token_repo=token_repo
-        )
     
     def scan_upload_folder(self) -> list[Path]:
         """

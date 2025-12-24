@@ -4,10 +4,11 @@ import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlencode, urlparse, parse_qs
 from typing import Optional
+
 import requests
 
-from ..config import get_config
 from ..storage import OAuthTokenRepository
+from .base_service import BaseService
 from .http_client import DeviantArtHttpClient
 
 
@@ -44,7 +45,7 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
-class AuthService:
+class AuthService(BaseService):
     """Service for managing DeviantArt OAuth2 authentication."""
     
     def __init__(
@@ -61,12 +62,13 @@ class AuthService:
             logger: Logger instance
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
-        self.config = get_config()
+        resolved_logger = logger or logging.getLogger(__name__)
+        if http_client is None:
+            http_client = DeviantArtHttpClient(
+                logger=resolved_logger, token_repo=token_repository
+            )
+        super().__init__(resolved_logger, token_repository, http_client)
         self.token_repository = token_repository
-        self.logger = logger or logging.getLogger(__name__)
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=self.logger, token_repo=token_repository
-        )
     
     def authorize(self) -> bool:
         """

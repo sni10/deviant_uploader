@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 class TestSleepPolicy:
     """Validate that services use HTTP client's recommended delay."""
 
-    @patch("src.service.profile_message_service.time.sleep", autospec=True)
+    @patch("src.service.api_pagination_helper.time.sleep", autospec=True)
     def test_profile_message_service_fetch_watchers_uses_recommended_delay(
         self, sleep_mock: MagicMock
     ) -> None:
@@ -25,11 +25,6 @@ class TestSleepPolicy:
         queue_repo = MagicMock()
         watcher_repo = MagicMock()
         logger = MagicMock()
-
-        # Mock config to avoid environment variable requirements
-        mock_config = MagicMock()
-        mock_config.broadcast_min_delay_seconds = 60
-        mock_config.broadcast_max_delay_seconds = 180
 
         http_client = MagicMock()
         http_client.get_recommended_delay.return_value = 7
@@ -55,7 +50,6 @@ class TestSleepPolicy:
             watcher_repo=watcher_repo,
             logger=logger,
             http_client=http_client,
-            config=mock_config,
         )
 
         service.fetch_watchers(access_token="token", username="me", max_watchers=100)
@@ -63,7 +57,7 @@ class TestSleepPolicy:
         http_client.get_recommended_delay.assert_called_once_with()
         sleep_mock.assert_called_once_with(7)
 
-    @patch("src.service.gallery_service.time.sleep", autospec=True)
+    @patch("src.service.api_pagination_helper.time.sleep", autospec=True)
     def test_gallery_service_fetch_galleries_uses_recommended_delay(
         self, sleep_mock: MagicMock
     ) -> None:
@@ -102,7 +96,7 @@ class TestSleepPolicy:
         http_client.get_recommended_delay.assert_called_once_with()
         sleep_mock.assert_called_once_with(9)
 
-    @patch("src.service.mass_fave_service.time.sleep", autospec=True)
+    @patch("src.service.api_pagination_helper.time.sleep", autospec=True)
     def test_mass_fave_service_collect_from_feed_uses_recommended_delay(
         self, sleep_mock: MagicMock
     ) -> None:

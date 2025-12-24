@@ -1,6 +1,5 @@
 """Service for broadcasting profile comments to watchers."""
 
-import time
 import random
 import threading
 from logging import Logger
@@ -13,12 +12,13 @@ from ..storage.profile_message_log_repository import ProfileMessageLogRepository
 from ..storage.profile_message_queue_repository import ProfileMessageQueueRepository
 from ..storage.watcher_repository import WatcherRepository
 from ..domain.models import MessageLogStatus, QueueStatus
-from ..config.settings import get_config
 from .message_randomizer import randomize_template
 from .http_client import DeviantArtHttpClient
+from .base_worker_service import BaseWorkerService
+from .api_pagination_helper import APIPaginationHelper
 
 
-class ProfileMessageService:
+class ProfileMessageService(BaseWorkerService):
     """Coordinates profile comment broadcasting to watchers."""
 
     WATCHERS_URL = "https://www.deviantart.com/api/v1/oauth2/user/watchers/{username}"
@@ -34,41 +34,20 @@ class ProfileMessageService:
         logger: Logger,
         token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
-        config: Optional[object] = None,
     ) -> None:
+        # Call BaseWorkerService.__init__, which calls BaseService.__init__
+        # This initializes logger, http_client, and config property
+        super().__init__(logger, token_repo, http_client)
+
         self.message_repo = message_repo
         self.log_repo = log_repo
         self.queue_repo = queue_repo
         self.watcher_repo = watcher_repo
-        self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(
-            logger=logger, token_repo=token_repo
-        )
-        self._config = config
-
-        # Worker state
-        self._worker_thread: Optional[threading.Thread] = None
-        self._worker_running = False
-        self._stop_flag = threading.Event()
-        self._worker_stats = {
-            "processed": 0,
-            "errors": 0,
-            "last_error": None,
-            "consecutive_failures": 0,
-        }
-        self._stats_lock = threading.Lock()
 
         # Watchers queue (filled by fetch_watchers)
         # Each item: {"username": str, "userid": str, "selected": bool}
         self._watchers_queue: list[dict] = []
         self._queue_lock = threading.Lock()
-
-    @property
-    def config(self):
-        """Lazy-load config if not provided during initialization."""
-        if self._config is None:
-            self._config = get_config()
-        return self._config
 
     # ========== Watchers Collection ==========
 
@@ -89,91 +68,76 @@ class ProfileMessageService:
             - has_more: Whether API indicates more watchers exist beyond fetched
             - fetch_failed: True if HTTP request failed before completion
         """
-        offset = 0
-        limit = 50  # API limit
-        watchers_fetched = 0
         watchers_list: list[dict] = []
-        has_more = False
+        watchers_fetched = 0
         fetch_failed = False
 
         self.logger.info(
-            "Fetching watchers for %s: max=%s, limit=%s",
+            "Fetching watchers for %s: max=%s",
             username,
             max_watchers,
-            limit,
         )
 
-        while watchers_fetched < max_watchers:
-            params = {
-                "access_token": access_token,
-                "limit": limit,
-                "offset": offset,
-            }
+        def process_watcher(watcher: dict) -> dict | None:
+            """Process each watcher item from API response."""
+            nonlocal watchers_fetched
 
-            try:
-                url = self.WATCHERS_URL.format(username=username)
-                response = self.http_client.get(url, params=params, timeout=30)
-                data = response.json() or {}
-            except requests.RequestException as e:
-                fetch_failed = True
-                self.logger.error("Watchers fetch failed: %s", e)
-                break
+            if watchers_fetched >= max_watchers:
+                return None  # Skip if we've reached limit
 
-            if not isinstance(data, dict):
-                fetch_failed = True
-                self.logger.error("Watchers fetch returned non-dict JSON: %r", data)
-                break
+            user = watcher.get("user", {}) if isinstance(watcher, dict) else {}
+            watcher_username = user.get("username")
+            watcher_userid = user.get("userid")
 
-            results = data.get("results", [])
-            for watcher in results:
-                user = watcher.get("user", {}) if isinstance(watcher, dict) else {}
-                watcher_username = user.get("username")
-                watcher_userid = user.get("userid")
-
-                if watcher_username and watcher_userid:
-                    watchers_list.append(
-                        {
-                            "username": watcher_username,
-                            "userid": watcher_userid,
-                            "selected": True,  # Selected by default
-                        }
+            if watcher_username and watcher_userid:
+                # Save to database
+                try:
+                    self.watcher_repo.add_or_update_watcher(
+                        watcher_username, watcher_userid
+                    )
+                except Exception as e:  # noqa: BLE001
+                    self.logger.warning(
+                        "Failed to save watcher %s: %s", watcher_username, e
                     )
 
-                    # Save to database
-                    try:
-                        self.watcher_repo.add_or_update_watcher(
-                            watcher_username, watcher_userid
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        self.logger.warning(
-                            "Failed to save watcher %s: %s", watcher_username, e
-                        )
+                watchers_fetched += 1
 
-                    watchers_fetched += 1
+                return {
+                    "username": watcher_username,
+                    "userid": watcher_userid,
+                    "selected": True,  # Selected by default
+                }
 
+            return None
+
+        try:
+            url = self.WATCHERS_URL.format(username=username)
+            pagination = APIPaginationHelper(self.http_client, self.logger)
+
+            # Calculate max_pages based on max_watchers
+            # API limit is 50 items per page
+            max_pages = (max_watchers + 49) // 50
+
+            for watcher_dict in pagination.paginate(
+                url=url,
+                access_token=access_token,
+                limit=50,
+                max_pages=max_pages,
+                process_item=process_watcher,
+            ):
+                watchers_list.append(watcher_dict)
+
+                # Stop if we've reached limit
                 if watchers_fetched >= max_watchers:
                     break
 
-            has_more = bool(data.get("has_more", False))
-            next_offset = data.get("next_offset")
+        except requests.RequestException as e:
+            fetch_failed = True
+            self.logger.error("Watchers fetch failed: %s", e)
 
-            if next_offset is not None:
-                try:
-                    offset = int(next_offset)
-                except (TypeError, ValueError):
-                    offset += limit
-            else:
-                offset += limit
-
-            if not has_more or watchers_fetched >= max_watchers:
-                break
-
-            # Delay between pages
-            delay = self.http_client.get_recommended_delay()
-            self.logger.debug(
-                "Waiting %s seconds before next watchers page request", delay
-            )
-            time.sleep(delay)
+        # We don't have direct access to has_more from pagination helper
+        # Assume has_more=True if we fetched exactly max_watchers
+        has_more = watchers_fetched >= max_watchers
 
         return watchers_list, watchers_fetched, has_more, fetch_failed
 
@@ -296,204 +260,60 @@ class ProfileMessageService:
             selected_message.body[:50],
             randomized_body[:50],
         )
-        
+
         return selected_message.message_id, randomized_body
 
-    def _get_broadcast_delay(self) -> int:
-        """Generate random delay for broadcasting (in seconds).
+    def _validate_worker_start(self) -> dict[str, object]:
+        """Validate conditions before starting worker.
 
         Returns:
-            Random delay in seconds between min and max configured values
+            Dictionary with validation result:
+            - If valid: {"valid": True}
+            - If invalid: {"valid": False, "message": "error description"}
         """
-        min_delay = self.config.broadcast_min_delay_seconds
-        max_delay = self.config.broadcast_max_delay_seconds
-        delay = random.randint(min_delay, max_delay)
-        self.logger.debug(
-            "Generated broadcast delay: %d seconds (range: %d-%d)",
-            delay,
-            min_delay,
-            max_delay,
-        )
-        return delay
-
-    def _format_http_error(self, error: requests.HTTPError) -> str:
-        """Format HTTP error with response details when available."""
-        response = getattr(error, "response", None)
-        if response is None:
-            return str(error)
-
-        status_code = getattr(response, "status_code", None)
-        error_payload: object | None
-        try:
-            error_payload = response.json()
-        except Exception:  # noqa: BLE001
-            error_payload = None
-
-        error_desc = None
-        error_code = None
-        error_name = None
-        if isinstance(error_payload, dict):
-            error_desc = error_payload.get("error_description")
-            error_code = error_payload.get("error_code")
-            error_name = error_payload.get("error")
-
-        parts = [f"HTTP {status_code}"]
-        if error_name:
-            parts.append(str(error_name))
-        if error_code is not None:
-            parts.append(f"code={error_code}")
-        if error_desc:
-            parts.append(str(error_desc))
-
-        return ": ".join([parts[0], " ".join(parts[1:])]) if len(parts) > 1 else parts[0]
-
-    def _is_critical_error(self, error: requests.HTTPError) -> bool:
-        """
-        Check if HTTP error is critical and requires immediate worker stop.
-        
-        Critical errors include:
-        - Spam detection by DeviantArt
-        - Account restrictions or bans
-        - Other policy violations
-        
-        Returns:
-            True if worker should stop immediately to prevent escalating sanctions.
-        """
-        response = getattr(error, "response", None)
-        if response is None:
-            return False
-
-        try:
-            error_payload = response.json()
-        except Exception:  # noqa: BLE001
-            return False
-
-        if not isinstance(error_payload, dict):
-            return False
-
-        # Check error_description for spam-related keywords
-        error_desc = error_payload.get("error_description", "")
-        if isinstance(error_desc, str):
-            error_desc_lower = error_desc.lower()
-            # Spam detection
-            if "spam" in error_desc_lower:
-                return True
-            # Account restrictions
-            if "banned" in error_desc_lower or "suspended" in error_desc_lower:
-                return True
-            # Rate limit abuse (different from normal 429)
-            if "abuse" in error_desc_lower or "violation" in error_desc_lower:
-                return True
-
-        return False
-
-    def _is_worker_alive(self) -> bool:
-        """Return True if the background worker thread is alive."""
-        return bool(self._worker_thread and self._worker_thread.is_alive())
-
-    def start_worker(self, access_token: str) -> dict:
-        """Start background worker thread.
-
-        Args:
-            access_token: OAuth access token for posting comments
-
-        Returns:
-            Status dictionary: {success, message}
-        """
-        if self._is_worker_alive():
-            return {"success": False, "message": "Worker already running"}
-
-        # Reset stale flag if the thread is not alive.
-        self._worker_running = False
-
         # Check if queue has pending entries in DB
         try:
             pending_count = self.queue_repo.get_queue_count(status=QueueStatus.PENDING)
             if pending_count == 0:
-                return {"success": False, "message": "No watchers in queue. Fetch watchers first."}
+                return {"valid": False, "message": "No watchers in queue. Fetch watchers first."}
         except Exception as e:
             self.logger.error("Failed to check queue count: %s", e)
-            return {"success": False, "message": f"Failed to check queue: {str(e)}"}
+            return {"valid": False, "message": f"Failed to check queue: {str(e)}"}
 
         # Check if there are active message templates
         active_messages = self.message_repo.get_active_messages()
         if not active_messages:
-            return {"success": False, "message": "No active message templates found. Please activate at least one template."}
+            return {"valid": False, "message": "No active message templates found. Please activate at least one template."}
 
-        self._stop_flag.clear()
-        with self._stats_lock:
-            self._worker_stats = {
-                "processed": 0,
-                "errors": 0,
-                "last_error": None,
-                "consecutive_failures": 0,
-            }
-
-        self._worker_thread = threading.Thread(
-            target=self._worker_loop,
-            args=(access_token,),
-            daemon=True,
-        )
-        self._worker_running = True
-        self._worker_thread.start()
-
-        self.logger.info("Worker thread started with %s active templates", len(active_messages))
-        return {"success": True, "message": "Worker started"}
-
-    def stop_worker(self) -> dict:
-        """Stop background worker thread.
-
-        Returns:
-            Status dictionary: {success, message}
-        """
-        if not self._is_worker_alive():
-            self._worker_running = False
-            return {"success": False, "message": "Worker not running"}
-
-        self._stop_flag.set()
-        if self._worker_thread:
-            self._worker_thread.join(timeout=10)
-
-        still_alive = self._is_worker_alive()
-        self._worker_running = still_alive
-
-        if still_alive:
-            self.logger.warning("Worker stop requested but thread is still running")
-            return {"success": True, "message": "Stop requested"}
-
-        self.logger.info("Worker thread stopped")
-        return {"success": True, "message": "Worker stopped"}
+        return {"valid": True}
 
     def get_worker_status(self) -> dict:
         """Get worker and queue status.
 
-        Returns:
-            Dictionary with: {running, processed, errors, last_error, queue_remaining, send_stats}
-        """
-        running = self._is_worker_alive()
-        if not running:
-            # Keep internal flag in sync for callers that still rely on it.
-            self._worker_running = False
+        Extends base worker status with queue-specific statistics.
 
-        # Count pending entries in DB queue
+        Returns:
+            Dictionary with: {running, processed, errors, last_error,
+                consecutive_failures, queue_remaining, send_stats}
+        """
+        # Get base worker status from BaseWorkerService
+        status = super().get_worker_status()
+
+        # Add queue-specific statistics
         try:
-            queue_remaining = self.queue_repo.get_queue_count(status=QueueStatus.PENDING)
+            queue_remaining = self.queue_repo.get_queue_count(
+                status=QueueStatus.PENDING
+            )
         except Exception as e:
             self.logger.error("Failed to get queue count: %s", e)
             queue_remaining = 0
 
         send_stats = self.log_repo.get_stats()
 
-        with self._stats_lock:
-            return {
-                "running": running,
-                "processed": self._worker_stats["processed"],
-                "errors": self._worker_stats["errors"],
-                "last_error": self._worker_stats["last_error"],
-                "consecutive_failures": self._worker_stats["consecutive_failures"],
-                "queue_remaining": queue_remaining,
-                "send_stats": send_stats,
-            }
+        status["queue_remaining"] = queue_remaining
+        status["send_stats"] = send_stats
+
+        return status
 
     def clear_queue(self) -> dict:
         """Clear pending entries from persistent queue.
@@ -1005,7 +825,8 @@ class ProfileMessageService:
                         broadcast_delay,
                         username,
                     )
-                    time.sleep(broadcast_delay)
+                    if self._interruptible_sleep(broadcast_delay):
+                        break
 
                     # Post comment to profile (HTTP client handles retry automatically)
                     url = self.PROFILE_COMMENT_URL.format(username=username)
@@ -1047,7 +868,8 @@ class ProfileMessageService:
                         "Waiting %s seconds before next profile comment request",
                         delay,
                     )
-                    time.sleep(delay)
+                    if self._interruptible_sleep(delay):
+                        break
 
                 except requests.HTTPError as e:
                     # HTTP error - check if it's critical first
@@ -1120,7 +942,8 @@ class ProfileMessageService:
                         "Waiting %s seconds before retry after failure",
                         delay,
                     )
-                    time.sleep(delay)
+                    if self._interruptible_sleep(delay):
+                        break
 
                 except requests.RequestException as e:
                     # Non-HTTP request error - handle normally
@@ -1168,7 +991,8 @@ class ProfileMessageService:
                         "Waiting %s seconds before retry after failure",
                         delay,
                     )
-                    time.sleep(delay)
+                    if self._interruptible_sleep(delay):
+                        break
 
                 except Exception as e:
                     # Unexpected error - log and continue
@@ -1199,7 +1023,8 @@ class ProfileMessageService:
                         "Waiting %s seconds before continuing after unexpected error",
                         delay,
                     )
-                    time.sleep(delay)
+                    if self._interruptible_sleep(delay):
+                        break
         finally:
             self._worker_running = False
             self.logger.info("Worker loop stopped")
