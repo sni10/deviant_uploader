@@ -32,6 +32,7 @@ class ProfileMessageService:
         queue_repo: ProfileMessageQueueRepository,
         watcher_repo: WatcherRepository,
         logger: Logger,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
         config: Optional[object] = None,
     ) -> None:
@@ -40,7 +41,9 @@ class ProfileMessageService:
         self.queue_repo = queue_repo
         self.watcher_repo = watcher_repo
         self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=logger, token_repo=token_repo
+        )
         self._config = config
 
         # Worker state

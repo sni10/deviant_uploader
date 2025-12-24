@@ -64,7 +64,9 @@ class AuthService:
         self.config = get_config()
         self.token_repository = token_repository
         self.logger = logger or logging.getLogger(__name__)
-        self.http_client = http_client or DeviantArtHttpClient(logger=self.logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=self.logger, token_repo=token_repository
+        )
     
     def authorize(self) -> bool:
         """

@@ -42,6 +42,7 @@ class CommentPosterService:
         queue_repo: DeviationCommentQueueRepository,
         log_repo: DeviationCommentLogRepository,
         logger: Logger,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
         config: Optional[object] = None,
     ) -> None:
@@ -49,7 +50,9 @@ class CommentPosterService:
         self.queue_repo = queue_repo
         self.log_repo = log_repo
         self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=logger, token_repo=token_repo
+        )
         self._config = config
 
         self._worker_thread: Optional[threading.Thread] = None
