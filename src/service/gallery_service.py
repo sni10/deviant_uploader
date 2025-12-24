@@ -33,6 +33,7 @@ class GalleryService:
         self,
         gallery_repository: GalleryRepository,
         logger: Logger,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
     ):
         """
@@ -41,11 +42,14 @@ class GalleryService:
         Args:
             gallery_repository: Gallery repository for database operations
             logger: Logger instance
+            token_repo: OAuth token repository for automatic token cleanup
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.gallery_repository = gallery_repository
         self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=logger, token_repo=token_repo
+        )
     
     def fetch_galleries(
         self, 

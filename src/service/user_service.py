@@ -32,6 +32,7 @@ class UserService:
         self,
         user_repository: UserRepository,
         logger: Logger,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
     ):
         """
@@ -40,11 +41,14 @@ class UserService:
         Args:
             user_repository: User repository for database operations
             logger: Logger instance
+            token_repo: OAuth token repository for automatic token cleanup
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.user_repository = user_repository
         self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=logger, token_repo=token_repo
+        )
     
     def fetch_whoami(self, access_token: str) -> Optional[dict]:
         """

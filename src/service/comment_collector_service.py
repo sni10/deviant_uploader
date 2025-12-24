@@ -30,13 +30,16 @@ class CommentCollectorService:
         log_repo: DeviationCommentLogRepository,
         state_repo: DeviationCommentStateRepository,
         logger: Logger,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
     ) -> None:
         self.queue_repo = queue_repo
         self.log_repo = log_repo
         self.state_repo = state_repo
         self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=logger, token_repo=token_repo
+        )
 
     def collect_from_watch_feed(
         self, access_token: str, max_pages: int = 5

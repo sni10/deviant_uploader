@@ -150,6 +150,7 @@ def get_services() -> tuple[AuthService, StatsService]:
             deviation_metadata_repo,
             deviation_repo,
             logger,
+            token_repo=token_repo,
         )
 
         g.services = (auth_service, stats_service)
@@ -186,6 +187,7 @@ def get_upload_services() -> tuple[UploaderService, PresetRepository, DeviationR
             auth_service,
             preset_repo,
             logger,
+            token_repo=token_repo,
         )
 
         g.upload_services = (uploader_service, preset_repo, deviation_repo)
@@ -209,8 +211,11 @@ def get_mass_fave_service() -> MassFaveService:
         # Create dedicated connection for the worker (not tied to request lifecycle)
         worker_connection = get_connection()
         feed_deviation_repo = FeedDeviationRepository(worker_connection)
+        token_repo = OAuthTokenRepository(worker_connection)
         logger = current_app.config["APP_LOGGER"]
-        mass_fave_service = MassFaveService(feed_deviation_repo, logger)
+        mass_fave_service = MassFaveService(
+            feed_deviation_repo, logger, token_repo=token_repo
+        )
         current_app.config["MASS_FAVE_SERVICE"] = mass_fave_service
 
     return current_app.config["MASS_FAVE_SERVICE"]
@@ -237,6 +242,7 @@ def get_stats_sync_service() -> StatsService:
         deviation_metadata_repo = DeviationMetadataRepository(worker_connection)
         deviation_repo = DeviationRepository(worker_connection)
         gallery_repo = GalleryRepository(worker_connection)
+        token_repo = OAuthTokenRepository(worker_connection)
         logger = current_app.config["APP_LOGGER"]
 
         stats_service = StatsService(
@@ -246,6 +252,7 @@ def get_stats_sync_service() -> StatsService:
             deviation_metadata_repo,
             deviation_repo,
             logger,
+            token_repo=token_repo,
             gallery_repository=gallery_repo,
         )
         current_app.config["STATS_SYNC_SERVICE"] = stats_service
@@ -271,13 +278,15 @@ def get_profile_message_service() -> ProfileMessageService:
         worker_conn2 = get_connection()
         worker_conn3 = get_connection()
         worker_conn4 = get_connection()
+        worker_conn5 = get_connection()
         message_repo = ProfileMessageRepository(worker_conn1)
         log_repo = ProfileMessageLogRepository(worker_conn2)
         queue_repo = ProfileMessageQueueRepository(worker_conn3)
         watcher_repo = WatcherRepository(worker_conn4)
+        token_repo = OAuthTokenRepository(worker_conn5)
         logger = current_app.config["APP_LOGGER"]
         profile_message_service = ProfileMessageService(
-            message_repo, log_repo, queue_repo, watcher_repo, logger
+            message_repo, log_repo, queue_repo, watcher_repo, logger, token_repo=token_repo
         )
         current_app.config["PROFILE_MESSAGE_SERVICE"] = profile_message_service
 
@@ -304,11 +313,13 @@ def get_deviation_comment_service() -> tuple[
         queue_conn = get_connection()
         log_conn = get_connection()
         state_conn = get_connection()
+        token_conn = get_connection()
 
         message_repo = DeviationCommentMessageRepository(message_conn)
         queue_repo = DeviationCommentQueueRepository(queue_conn)
         log_repo = DeviationCommentLogRepository(log_conn)
         state_repo = DeviationCommentStateRepository(state_conn)
+        token_repo = OAuthTokenRepository(token_conn)
 
         logger = current_app.config["APP_LOGGER"]
         collector = CommentCollectorService(
@@ -316,12 +327,14 @@ def get_deviation_comment_service() -> tuple[
             log_repo=log_repo,
             state_repo=state_repo,
             logger=logger,
+            token_repo=token_repo,
         )
         poster = CommentPosterService(
             message_repo=message_repo,
             queue_repo=queue_repo,
             log_repo=log_repo,
             logger=logger,
+            token_repo=token_repo,
         )
         current_app.config["DEVIATION_COMMENT_SERVICES"] = (collector, poster)
 
