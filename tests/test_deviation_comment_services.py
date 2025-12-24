@@ -92,6 +92,7 @@ def test_comment_poster_worker_success_logs_and_marks() -> None:
         logger=logger,
         http_client=http_client,
     )
+    service._config = mock_config
     # First call (broadcast_delay): return False to continue
     # Second call (after success): return True to stop
     service._stop_flag.wait = MagicMock(side_effect=[False, True])
@@ -141,6 +142,7 @@ def test_comment_poster_non_retryable_http_error_marks_failed() -> None:
         logger=logger,
         http_client=http_client,
     )
+    service._config = mock_config
     # First call (broadcast_delay): return False to continue
     # Second call (after failure): return True to stop
     service._stop_flag.wait = MagicMock(side_effect=[False, True])
@@ -169,6 +171,7 @@ def test_fave_deviation_success() -> None:
         logger=logger,
         http_client=http_client,
     )
+    service._config = mock_config
 
     result = service._fave_deviation(
         access_token="test_token",
@@ -204,6 +207,7 @@ def test_fave_deviation_failure_does_not_raise() -> None:
         logger=logger,
         http_client=http_client,
     )
+    service._config = mock_config
 
     # Should not raise exception
     result = service._fave_deviation(
@@ -236,6 +240,7 @@ def test_fave_deviation_generic_exception_does_not_raise() -> None:
         logger=logger,
         http_client=http_client,
     )
+    service._config = mock_config
 
     # Should not raise exception
     result = service._fave_deviation(
