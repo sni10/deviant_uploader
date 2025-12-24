@@ -9,31 +9,6 @@ from ..domain.models import ProfileMessage
 class ProfileMessageRepository(BaseRepository):
     """Provides persistence for profile message templates."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "_session"):
-            # Use the DBConnection wrapper to ensure thread-safety and
-            # automatic rollback on DBAPI/SQLAlchemy errors.
-            return self.conn.execute(statement)
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row."""
-        result = self._execute_core(statement)
-
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     def create_message(self, title: str, body: str) -> int:
         """Create new profile message template.
 
@@ -45,15 +20,9 @@ class ProfileMessageRepository(BaseRepository):
             message_id of created template
         """
         stmt = insert(profile_messages).values(title=title, body=body, is_active=True)
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        # Get last inserted id
-        if hasattr(result, 'inserted_primary_key'):
-            return result.inserted_primary_key[0]
-        else:
-            # For SQLite
-            return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return self._insert_returning_id(
+            stmt, returning_col=profile_messages.c.message_id
+        )
 
     def get_message_by_id(self, message_id: int) -> ProfileMessage | None:
         """Get message template by ID.
@@ -150,7 +119,13 @@ class ProfileMessageRepository(BaseRepository):
             for row in rows
         ]
 
-    def update_message(self, message_id: int, title: str | None = None, body: str | None = None, is_active: bool | None = None) -> None:
+    def update_message(
+        self,
+        message_id: int,
+        title: str | None = None,
+        body: str | None = None,
+        is_active: bool | None = None,
+    ) -> None:
         """Update message template.
 
         Args:
@@ -159,25 +134,24 @@ class ProfileMessageRepository(BaseRepository):
             body: New body (optional)
             is_active: New active status (optional)
         """
-        values = {}
+        values: dict[str, object] = {}
         if title is not None:
-            values['title'] = title
+            values["title"] = title
         if body is not None:
-            values['body'] = body
+            values["body"] = body
         if is_active is not None:
-            values['is_active'] = is_active
+            values["is_active"] = is_active
 
         if not values:
             return
 
-        values['updated_at'] = func.current_timestamp()
+        values["updated_at"] = func.current_timestamp()
 
         stmt = update(profile_messages).where(
             profile_messages.c.message_id == message_id
         ).values(**values)
 
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def delete_message(self, message_id: int) -> None:
         """Delete message template.
@@ -185,6 +159,7 @@ class ProfileMessageRepository(BaseRepository):
         Args:
             message_id: Message ID to delete
         """
-        stmt = delete(profile_messages).where(profile_messages.c.message_id == message_id)
-        self._execute_core(stmt)
-        self.conn.commit()
+        stmt = delete(profile_messages).where(
+            profile_messages.c.message_id == message_id
+        )
+        self._execute_and_commit(stmt)

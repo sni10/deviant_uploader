@@ -10,19 +10,6 @@ from ..domain.models import Watcher
 class WatcherRepository(BaseRepository):
     """Provides persistence for DeviantArt watchers."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "_session"):
-            # Use the DBConnection wrapper to ensure thread-safety and
-            # automatic rollback on DBAPI/SQLAlchemy errors.
-            return self.conn.execute(statement)
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
     def add_or_update_watcher(self, username: str, userid: str) -> None:
         """Add watcher or update fetched_at if exists.
 
@@ -40,8 +27,7 @@ class WatcherRepository(BaseRepository):
             .inline()
         )
 
-        self._execute_core(stmt)
-        self.conn.commit()
+        self._execute_and_commit(stmt)
 
     def get_all_watchers(self, limit: int = 1000) -> list[Watcher]:
         """Get all watchers ordered by fetched_at DESC.
@@ -83,13 +69,7 @@ class WatcherRepository(BaseRepository):
             Total count of watchers
         """
         stmt = select(func.count()).select_from(watchers)
-        result = self._execute_core(stmt)
-
-        if hasattr(result, "scalar"):
-            return result.scalar() or 0
-
-        row = result.fetchone()
-        return row[0] if row else 0
+        return self._scalar(stmt) or 0
 
     def delete_watchers_not_in_list(self, usernames: list[str]) -> int:
         """Delete watchers whose usernames are not in the provided list.
@@ -110,11 +90,5 @@ class WatcherRepository(BaseRepository):
             # Delete watchers not in the list
             stmt = delete(watchers).where(watchers.c.username.notin_(usernames))
 
-        result = self._execute_core(stmt)
-        self.conn.commit()
-
-        # Get rowcount
-        if hasattr(result, "rowcount"):
-            return result.rowcount or 0
-
-        return 0
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)

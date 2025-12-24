@@ -9,31 +9,6 @@ from ..domain.models import ProfileMessageLog, MessageLogStatus
 class ProfileMessageLogRepository(BaseRepository):
     """Provides persistence for profile message send logs."""
 
-    def _execute_core(self, statement):
-        """Execute SQLAlchemy Core statement and return result.
-
-        Handles both SQLAlchemy connections and raw SQLite connections.
-        """
-        if hasattr(self.conn, "_session"):
-            # Use the DBConnection wrapper to ensure thread-safety and
-            # automatic rollback on DBAPI/SQLAlchemy errors.
-            return self.conn.execute(statement)
-
-        compiled = statement.compile(compile_kwargs={"literal_binds": True})
-        return self.conn.execute(str(compiled))
-
-    def _scalar(self, statement) -> int | str | None:
-        """Execute statement and return first column of the first row."""
-        result = self._execute_core(statement)
-
-        if hasattr(result, "scalar"):
-            return result.scalar()
-
-        row = result.fetchone()
-        if row is None:
-            return None
-        return row[0]
-
     def add_log(
         self,
         message_id: int,
@@ -65,17 +40,13 @@ class ProfileMessageLogRepository(BaseRepository):
             error_message=error_message,
         )
 
-        result = self._execute_core(stmt)
-        self.conn.commit()
+        return self._insert_returning_id(
+            stmt, returning_col=profile_message_logs.c.log_id
+        )
 
-        # Get last inserted id
-        if hasattr(result, 'inserted_primary_key'):
-            return result.inserted_primary_key[0]
-        else:
-            # For SQLite
-            return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    def get_logs_by_message_id(self, message_id: int, limit: int = 100, offset: int = 0) -> list[ProfileMessageLog]:
+    def get_logs_by_message_id(
+        self, message_id: int, limit: int = 100, offset: int = 0
+    ) -> list[ProfileMessageLog]:
         """Get logs for specific message template.
 
         Args:
@@ -120,7 +91,9 @@ class ProfileMessageLogRepository(BaseRepository):
             for row in rows
         ]
 
-    def get_all_logs(self, limit: int = 100, offset: int = 0) -> list[ProfileMessageLog]:
+    def get_all_logs(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[ProfileMessageLog]:
         """Get all logs across all messages.
 
         Args:
@@ -175,7 +148,9 @@ class ProfileMessageLogRepository(BaseRepository):
         base_query = select(func.count()).select_from(profile_message_logs)
 
         if message_id is not None:
-            base_query = base_query.where(profile_message_logs.c.message_id == message_id)
+            base_query = base_query.where(
+                profile_message_logs.c.message_id == message_id
+            )
 
         stmt_sent = base_query.where(profile_message_logs.c.status == 'sent')
         stmt_failed = base_query.where(profile_message_logs.c.status == 'failed')
@@ -204,7 +179,9 @@ class ProfileMessageLogRepository(BaseRepository):
         )
         return self._scalar(stmt) or 0
 
-    def get_failed_logs(self, limit: int = 1000, offset: int = 0) -> list[ProfileMessageLog]:
+    def get_failed_logs(
+        self, limit: int = 1000, offset: int = 0
+    ) -> list[ProfileMessageLog]:
         """Get all failed message logs.
 
         Args:
@@ -261,16 +238,13 @@ class ProfileMessageLogRepository(BaseRepository):
             return 0
 
         log_ids = [log.log_id for log in failed_logs]
-        
+
         stmt = delete(profile_message_logs).where(
             profile_message_logs.c.log_id.in_(log_ids)
         )
-        
-        result = self._execute_core(stmt)
-        self.conn.commit()
-        
-        deleted_count = result.rowcount
-        return deleted_count
+
+        result = self._execute_and_commit(stmt)
+        return self._rowcount(result)
 
     def get_all_recipient_userids(self) -> set[str]:
         """Get all unique recipient_userid values from logs.
@@ -279,8 +253,8 @@ class ProfileMessageLogRepository(BaseRepository):
             Set of recipient_userid strings (both sent and failed)
         """
         stmt = select(profile_message_logs.c.recipient_userid).distinct()
-        
+
         result = self._execute_core(stmt)
         rows = result.fetchall()
-        
+
         return {row[0] for row in rows if row[0]}

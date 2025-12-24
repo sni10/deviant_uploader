@@ -16,7 +16,7 @@ _initialized: bool = False
 
 
 def init_database(db_path: str | Path) -> None:
-    """Legacy SQLite initializer (removed).
+    """Legacy initializer (removed).
 
     The project is PostgreSQL-only. This function exists only so that any
     remaining legacy callsites fail loudly.

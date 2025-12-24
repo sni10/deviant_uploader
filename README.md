@@ -55,7 +55,7 @@ Web app for managing DeviantArt content: batch uploads, statistics, charts.
 
 ### Technical Features
 - OAuth2 authentication with auto-refresh
-- SQLite and PostgreSQL support (SQLite default)
+- PostgreSQL support (SQLAlchemy)
 - SQLAlchemy Core for queries
 - Rate limiting with exponential backoff
 - Responsive UI (Bootstrap 5)
@@ -195,9 +195,7 @@ Automated commenting on deviations from feeds.
 | `DA_CLIENT_ID` | Yes | - | DeviantArt Client ID |
 | `DA_CLIENT_SECRET` | Yes | - | DeviantArt Client Secret |
 | `DA_REDIRECT_URI` | No | `http://localhost:8080/callback` | OAuth redirect URI |
-| `DATABASE_TYPE` | No | `sqlite` | `sqlite` or `postgresql` |
-| `DATABASE_PATH` | No | `data/deviant.db` | SQLite database path |
-| `DATABASE_URL` | No | - | PostgreSQL connection string |
+| `DATABASE_URL` | No | - | PostgreSQL connection string (or use DB_* variables) |
 | `UPLOAD_DIR` | No | `upload` | Upload folder path |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 
@@ -220,7 +218,7 @@ deviant/
 │   │   ├── gallery_service.py # Gallery management
 │   │   └── user_service.py    # User management
 │   ├── storage/               # Repositories & DB
-│   │   ├── adapters/          # DB adapters (SQLite, PostgreSQL)
+│   │   ├── adapters/          # DB adapters (PostgreSQL)
 │   │   ├── models.py          # SQLAlchemy models
 │   │   ├── *_repository.py    # Repositories for each entity
 │   │   └── database.py        # DB schema
@@ -236,7 +234,6 @@ deviant/
 │   ├── upload_admin.html      # Upload Admin Interface
 │   └── upload_admin.js
 ├── tests/                     # Tests
-├── data/                      # SQLite database
 ├── upload/                    # Upload folder
 │   └── done/                  # Uploaded files
 ├── logs/                      # Application logs
@@ -249,17 +246,9 @@ deviant/
 
 ## Database
 
-SQLite is used by default:
+PostgreSQL is required:
 
 ```env
-DATABASE_TYPE=sqlite
-DATABASE_PATH=data/deviant.db
-```
-
-To use PostgreSQL:
-
-```env
-DATABASE_TYPE=postgresql
 DATABASE_URL=postgresql://user:password@localhost:5432/deviant
 ```
 
@@ -268,7 +257,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/deviant
 The app follows DDD, SOLID, OOP principles:
 
 - **Domain Layer**: User, Gallery, Deviation models
-- **Storage Layer**: repositories with unified interface (SQLite/PostgreSQL)
+- **Storage Layer**: repositories with unified interface (PostgreSQL)
 - **Service Layer**: business logic (Auth, Stats, Upload)
 - **API Layer**: Flask REST API
 - **Presentation Layer**: Bootstrap 5 web interfaces
