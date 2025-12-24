@@ -352,6 +352,7 @@ def test_comment_poster_http_500_removes_from_queue_and_logs_deleted() -> None:
         logger=logger,
         http_client=http_client,
     )
+    service._config = mock_config
     # First call (broadcast_delay): return False to continue
     # Second call (after handling deleted): return True to stop
     service._stop_flag.wait = MagicMock(side_effect=[False, True])
