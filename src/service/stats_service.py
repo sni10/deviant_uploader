@@ -31,6 +31,7 @@ class StatsService:
         deviation_metadata_repository: DeviationMetadataRepository,
         deviation_repository: DeviationRepository,
         logger: Logger,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
         gallery_repository: Optional[GalleryRepository] = None,
     ) -> None:
@@ -41,7 +42,9 @@ class StatsService:
         self.deviation_repository = deviation_repository
         self.gallery_repo = gallery_repository
         self.logger = logger
-        self.http_client = http_client or DeviantArtHttpClient(logger=logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=logger, token_repo=token_repo
+        )
 
         # Worker state
         self._worker_thread: Optional[threading.Thread] = None

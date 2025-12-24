@@ -34,6 +34,7 @@ class UploaderService:
         auth_service: AuthService,
         preset_repository: Optional[PresetRepository] = None,
         logger: Optional[logging.Logger] = None,
+        token_repo=None,
         http_client: Optional[DeviantArtHttpClient] = None,
     ):
         """
@@ -45,6 +46,7 @@ class UploaderService:
             auth_service: Authentication service
             preset_repository: Repository for preset management (optional)
             logger: Logger instance
+            token_repo: OAuth token repository for automatic token cleanup
             http_client: HTTP client for API requests (optional, creates default if not provided)
         """
         self.config = get_config()
@@ -53,7 +55,9 @@ class UploaderService:
         self.auth_service = auth_service
         self.preset_repository = preset_repository
         self.logger = logger or logging.getLogger(__name__)
-        self.http_client = http_client or DeviantArtHttpClient(logger=self.logger)
+        self.http_client = http_client or DeviantArtHttpClient(
+            logger=self.logger, token_repo=token_repo
+        )
     
     def scan_upload_folder(self) -> list[Path]:
         """
