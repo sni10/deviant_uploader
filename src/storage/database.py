@@ -23,7 +23,7 @@ def init_database(db_path: str | Path) -> None:
     """
 
     raise RuntimeError(
-        "SQLite backend has been deprecated and removed. "
+        "Legacy backend has been removed. "
         "Configure PostgreSQL via DATABASE_URL/DB_* and use get_connection()."
     )
 

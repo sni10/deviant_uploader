@@ -1,6 +1,6 @@
 """Tests for Profile Messages API datetime serialization.
 
-SQLite can return datetime columns as strings. The API should not assume
+Some drivers can return datetime columns as strings. The API should not assume
 datetime objects and call .isoformat() unconditionally.
 """
 

@@ -628,8 +628,7 @@ class StatsService(BaseWorkerService):
         Returns:
             Dictionary with labels (dates) and datasets (views, favourites)
         """
-        # PostgreSQL-compatible query (no SQLite-specific `?` placeholders / `date('now', ...)`).
-        # `deviation_ids` is optional; when provided we filter using `= ANY(:deviation_ids)`.
+        # PostgreSQL query; `deviation_ids` is optional via `= ANY(:deviation_ids)`.
         query = text(
             """
             SELECT
