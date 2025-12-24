@@ -189,8 +189,9 @@ class MassFaveService(BaseWorkerService):
                 deviationid = deviation["deviationid"]
 
                 try:
-                    # Attempt to fave (HTTP client handles retry automatically)
-                    response = self.http_client.post(
+                    # Attempt to fave (automatic token refresh via BaseWorkerService)
+                    response = self.execute_with_token_refresh(
+                        self.http_client.post,
                         self.FAVE_URL,
                         data={"deviationid": deviationid, "access_token": access_token},
                         timeout=30,

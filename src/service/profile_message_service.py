@@ -782,10 +782,6 @@ class ProfileMessageService(BaseWorkerService):
     def _worker_loop(self, access_token: str) -> None:
         """Background worker loop (runs in separate thread)."""
         self.logger.info("Worker loop started with randomized message templates")
-
-        # Use mutable variable so we can update token on refresh
-        current_access_token = access_token
-
         try:
             while not self._stop_flag.is_set():
                 # Get next pending entry from DB queue
@@ -832,11 +828,12 @@ class ProfileMessageService(BaseWorkerService):
                     if self._interruptible_sleep(broadcast_delay):
                         break
 
-                    # Post comment to profile (HTTP client handles retry automatically)
+                    # Post comment to profile (automatic token refresh via BaseWorkerService)
                     url = self.PROFILE_COMMENT_URL.format(username=username)
-                    response = self.http_client.post(
+                    response = self.execute_with_token_refresh(
+                        self.http_client.post,
                         url,
-                        data={"body": message_body, "access_token": current_access_token},
+                        data={"body": message_body, "access_token": access_token},
                         timeout=30,
                     )
 
@@ -876,49 +873,6 @@ class ProfileMessageService(BaseWorkerService):
                         break
 
                 except requests.HTTPError as e:
-                    # Check if token expired - attempt refresh and retry
-                    if self._is_expired_token_error(e):
-                        self.logger.warning("Expired token detected, attempting refresh...")
-                        new_token = self._refresh_access_token()
-
-                        if new_token:
-                            # Token refreshed successfully - update and retry this item
-                            current_access_token = new_token
-                            self.logger.info("Token refreshed, retrying message to %s", username)
-
-                            # Unmark as processing so it can be retried
-                            try:
-                                self.queue_repo.mark_pending(queue_id)
-                            except Exception as ex:
-                                self.logger.warning("Failed to unmark queue entry %s: %s", queue_id, ex)
-
-                            # Continue to next iteration (will retry this item)
-                            continue
-                        else:
-                            # Token refresh failed - stop worker
-                            error_msg = "Failed to refresh expired OAuth token"
-                            self.logger.critical(
-                                "CRITICAL ERROR: %s - Stopping worker. Please re-authenticate manually.",
-                                error_msg,
-                            )
-                            self.log_repo.add_log(
-                                message_id=message_id,
-                                recipient_username=username,
-                                recipient_userid=userid,
-                                status=MessageLogStatus.FAILED,
-                                error_message=error_msg,
-                            )
-                            with self._stats_lock:
-                                self._worker_stats["errors"] += 1
-                                self._worker_stats["consecutive_failures"] += 1
-                                self._worker_stats["last_error"] = error_msg
-                            # Remove from queue
-                            try:
-                                self.queue_repo.remove_from_queue(queue_id)
-                            except Exception as ex:
-                                self.logger.warning("Failed to remove queue entry %s: %s", queue_id, ex)
-                            break
-
                     # HTTP error - check if it's critical first
                     error_msg = self._format_http_error(e)
 

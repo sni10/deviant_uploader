@@ -236,6 +236,83 @@ class BaseWorkerService(BaseService):
             )
             return None
 
+    def execute_with_token_refresh(self, http_call, *args, **kwargs):
+        """Execute HTTP call with automatic token refresh on expiration.
+
+        CENTRALIZED method that wraps any HTTP call and automatically handles
+        token expiration by refreshing and retrying the request.
+
+        Args:
+            http_call: Callable that performs HTTP request
+            *args: Positional arguments to pass to http_call
+            **kwargs: Keyword arguments to pass to http_call.
+                     Must include 'access_token' or 'token' parameter.
+
+        Returns:
+            Result from http_call
+
+        Raises:
+            requests.HTTPError: If error is not expired token or refresh fails
+            Exception: Any other exception from http_call
+
+        Example:
+            response = self.execute_with_token_refresh(
+                self.http_client.post,
+                url,
+                data={"body": text, "access_token": token}
+            )
+        """
+        max_retries = 1  # Only retry once after token refresh
+
+        for attempt in range(max_retries + 1):
+            try:
+                return http_call(*args, **kwargs)
+
+            except requests.HTTPError as e:
+                # Check if this is expired token error
+                if not self._is_expired_token_error(e):
+                    # Not expired token, propagate error
+                    raise
+
+                # Expired token detected
+                if attempt >= max_retries:
+                    # Already retried, can't retry again
+                    self.logger.error(
+                        "Token refresh retry exhausted, propagating error"
+                    )
+                    raise
+
+                # Try to refresh token
+                self.logger.warning(
+                    "Expired token detected in HTTP call, attempting refresh..."
+                )
+                new_token = self._refresh_access_token()
+
+                if not new_token:
+                    # Token refresh failed, propagate error
+                    self.logger.error(
+                        "Token refresh failed, cannot retry HTTP call"
+                    )
+                    raise
+
+                # Token refreshed successfully - update token in kwargs/args
+                self.logger.info(
+                    "Token refreshed successfully, retrying HTTP call..."
+                )
+
+                # Update access_token in kwargs if present
+                if "data" in kwargs and isinstance(kwargs["data"], dict):
+                    if "access_token" in kwargs["data"]:
+                        kwargs["data"]["access_token"] = new_token
+
+                # Update access_token in params if present
+                if "params" in kwargs and isinstance(kwargs["params"], dict):
+                    if "access_token" in kwargs["params"]:
+                        kwargs["params"]["access_token"] = new_token
+
+                # Retry the call with updated token
+                continue
+
     @abstractmethod
     def _validate_worker_start(self) -> dict[str, object]:
         """Validate conditions before starting worker.

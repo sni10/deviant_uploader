@@ -105,8 +105,10 @@ class StatsService(BaseWorkerService):
             if username:
                 params["username"] = username
 
-            # HTTP client handles retry automatically
-            response = self.http_client.get(url, params=params)
+            # Automatic token refresh via BaseWorkerService
+            response = self.execute_with_token_refresh(
+                self.http_client.get, url, params=params
+            )
             payload = response.json()
 
             results = payload.get("results", [])
@@ -178,8 +180,10 @@ class StatsService(BaseWorkerService):
                 len(deviationids),
             )
 
-            # HTTP client handles retry automatically
-            response = self.http_client.get(url, params=params)
+            # Automatic token refresh via BaseWorkerService
+            response = self.execute_with_token_refresh(
+                self.http_client.get, url, params=params
+            )
             payload = response.json()
             fetched_count = len(payload.get("metadata", []))
             all_meta.extend(payload.get("metadata", []))
@@ -231,8 +235,10 @@ class StatsService(BaseWorkerService):
                 "with_session": "false",
             }
 
-            # HTTP client handles retry automatically
-            response = self.http_client.get(url, params=params)
+            # Automatic token refresh via BaseWorkerService
+            response = self.execute_with_token_refresh(
+                self.http_client.get, url, params=params
+            )
             payload = response.json()
             
             if isinstance(payload, dict):
@@ -286,8 +292,10 @@ class StatsService(BaseWorkerService):
         self.logger.info("Fetching user profile for snapshot: %s", username)
 
         try:
-            # HTTP client handles retry automatically
-            resp = self.http_client.get(url, params=params, timeout=30)
+            # Automatic token refresh via BaseWorkerService
+            resp = self.execute_with_token_refresh(
+                self.http_client.get, url, params=params, timeout=30
+            )
             payload = resp.json()
         except Exception as exc:  # noqa: BLE001
             self.logger.error("Failed to fetch user profile %s: %s", username, exc)

@@ -145,8 +145,11 @@ class CommentPosterService(BaseWorkerService):
         """
         try:
             url = self.DEVIATION_URL.format(deviationid=deviationid)
-            self.http_client.get(
-                url, params={"access_token": access_token}, timeout=30
+            self.execute_with_token_refresh(
+                self.http_client.get,
+                url,
+                params={"access_token": access_token},
+                timeout=30
             )
             self.logger.debug(
                 "Deviation %s exists and is accessible", deviationid
@@ -191,7 +194,12 @@ class CommentPosterService(BaseWorkerService):
             data["commentid"] = commentid
 
         url = self.COMMENT_URL.format(deviationid=deviationid)
-        return self.http_client.post(url, data=data, timeout=30)
+        return self.execute_with_token_refresh(
+            self.http_client.post,
+            url,
+            data=data,
+            timeout=30
+        )
 
     def _fave_deviation(
         self,
@@ -209,7 +217,8 @@ class CommentPosterService(BaseWorkerService):
             True if faved successfully, False otherwise
         """
         try:
-            self.http_client.post(
+            self.execute_with_token_refresh(
+                self.http_client.post,
                 self.FAVE_URL,
                 data={"deviationid": deviationid, "access_token": access_token},
                 timeout=30,
