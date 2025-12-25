@@ -3,6 +3,9 @@
 from abc import ABC
 from typing import Any, Protocol, runtime_checkable
 
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
 
 @runtime_checkable
 class DBConnection(Protocol):
@@ -128,8 +131,65 @@ class BaseRepository(ABC):
             raise ValueError("returning_col is required for returning id")
 
         stmt = insert_stmt.returning(returning_col)
-        result = self._execute(stmt)
+        try:
+            result = self._execute(stmt)
+        except IntegrityError as exc:
+            if not self._is_unique_violation(exc):
+                raise
+            if not self._sync_sequence_for_column(returning_col):
+                raise
+            result = self._execute(stmt)
         # Fetch the row BEFORE committing to avoid cursor closure
         row = result.fetchone()
         self._conn.commit()
         return None if row is None else row[0]
+
+    def _is_unique_violation(self, error: IntegrityError) -> bool:
+        """Return True when IntegrityError represents a unique violation."""
+
+        orig = getattr(error, "orig", None)
+        pgcode = getattr(orig, "pgcode", None)
+        if pgcode == "23505":
+            return True
+
+        message = str(error).lower()
+        return "unique constraint" in message or "duplicate key" in message
+
+    def _sync_sequence_for_column(self, column: Any) -> bool:
+        """Sync sequence for a serial/identity column to max value.
+
+        Returns:
+            True if sequence was updated, False otherwise.
+        """
+        table = getattr(column, "table", None)
+        column_name = getattr(column, "name", None)
+        table_name = getattr(table, "name", None)
+        schema_name = getattr(table, "schema", None)
+
+        if table_name is None or column_name is None:
+            return False
+
+        if schema_name:
+            qualified_table = f"{schema_name}.{table_name}"
+        else:
+            qualified_table = table_name
+
+        seq_stmt = select(
+            func.pg_get_serial_sequence(qualified_table, column_name)
+        )
+        try:
+            sequence_name = self._scalar(seq_stmt)
+            if not sequence_name:
+                return False
+
+            max_stmt = select(func.coalesce(func.max(column), 0))
+            max_value = self._scalar(max_stmt)
+            if max_value is None:
+                max_value = 0
+
+            setval_stmt = select(func.setval(sequence_name, max_value))
+            self._execute(setval_stmt)
+            self._conn.commit()
+            return True
+        except SQLAlchemyError:
+            return False

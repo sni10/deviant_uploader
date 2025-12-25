@@ -95,7 +95,42 @@
                 <div id="templates-list"></div>
             </div>
         </div>
+        <!-- Worker Control -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Comment Worker</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end mb-3">
 
+                    <div class="col-md-12">
+                        <label class="form-label small text-muted mb-1">Template</label>
+                        <div class="row g-8 align-items-end">
+
+                            <div class="col-md-4">
+                                <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Worker</button>
+                                <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Worker</button>
+                            </div>
+                            <div class="col-md-4">
+                                <select id="template-select" class="form-select">
+                                    <option value="">Random Active Template</option>
+                                </select>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+                <div class="row g-3 align-items-end mb-3">
+                    <div class="col-md-12">
+                        <div class="row g-8 align-items-end">
+                            <div class="col-md-4">
+                                <span class="badge bg-secondary" id="worker-status">Stopped</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- Collectors -->
         <div class="card shadow-sm mb-3">
             <div class="card-header bg-white">
@@ -156,42 +191,7 @@
             </div>
         </div>
 
-        <!-- Worker Control -->
-        <div class="card shadow-sm mb-3">
-            <div class="card-header bg-white">
-                <h5 class="mb-0">Comment Worker</h5>
-            </div>
-            <div class="card-body">
-                <div class="row g-3 align-items-end mb-3">
 
-                    <div class="col-md-12">
-                        <label class="form-label small text-muted mb-1">Template</label>
-                        <div class="row g-8 align-items-end">
-
-                            <div class="col-md-4">
-                                <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Worker</button>
-                                <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Worker</button>
-                            </div>
-                            <div class="col-md-4">
-                                <select id="template-select" class="form-select">
-                                    <option value="">Random Active Template</option>
-                                </select>
-                            </div>
-                        </div>
-
-                    </div>
-                </div>
-                <div class="row g-3 align-items-end mb-3">
-                    <div class="col-md-12">
-                        <div class="row g-8 align-items-end">
-                            <div class="col-md-4">
-                                <span class="badge bg-secondary" id="worker-status">Stopped</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <!-- Status -->
         <div id="status" class="alert alert-secondary py-2 mb-3" role="alert">Ready.</div>

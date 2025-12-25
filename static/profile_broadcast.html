@@ -95,6 +95,27 @@
                 <div id="messages-list"></div>
             </div>
         </div>
+        <!-- Worker Control -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Broadcast Worker</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info mb-3" role="alert">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>Randomized Templates:</strong> Worker will randomly select from active message templates for each send.
+                    To activate/deactivate templates, click "Edit" button and use "Active" checkbox in the edit dialog.
+                </div>
+                <div class="d-flex gap-2 mb-3">
+                    <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Broadcasting</button>
+                    <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Broadcasting</button>
+                    <button class="btn btn-warning" onclick="retryFailedMessages()">Retry Failed</button>
+                </div>
+                <div>
+                    <span class="badge bg-secondary" id="worker-status">Stopped</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Fetch Watchers -->
         <div class="card shadow-sm mb-3">
@@ -182,28 +203,6 @@
                             </tr>
                         </tbody>
                     </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Worker Control -->
-        <div class="card shadow-sm mb-3">
-            <div class="card-header bg-white">
-                <h5 class="mb-0">Broadcast Worker</h5>
-            </div>
-            <div class="card-body">
-                <div class="alert alert-info mb-3" role="alert">
-                    <i class="bi bi-info-circle"></i>
-                    <strong>Randomized Templates:</strong> Worker will randomly select from active message templates for each send.
-                    To activate/deactivate templates, click "Edit" button and use "Active" checkbox in the edit dialog.
-                </div>
-                <div class="d-flex gap-2 mb-3">
-                    <button id="btn-start" class="btn btn-success" onclick="startWorker()">Start Broadcasting</button>
-                    <button id="btn-stop" class="btn btn-danger" onclick="stopWorker()" disabled>Stop Broadcasting</button>
-                    <button class="btn btn-warning" onclick="retryFailedMessages()">Retry Failed</button>
-                </div>
-                <div>
-                    <span class="badge bg-secondary" id="worker-status">Stopped</span>
                 </div>
             </div>
         </div>
