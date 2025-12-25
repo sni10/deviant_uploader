@@ -91,6 +91,13 @@ class MassFaveService(BaseWorkerService):
                 except ValueError:
                     ts = current_time
 
+            title = deviation.get("title", "Unknown Title")
+            self.logger.info(
+                "Deviation collected: ID-%s TITLE:%s;",
+                deviationid,
+                title,
+            )
+
             self.repo.add_deviation(str(deviationid), ts)
             return True
 

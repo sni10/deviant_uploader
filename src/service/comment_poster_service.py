@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from logging import Logger
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import requests
 
@@ -21,6 +21,9 @@ from ..storage.deviation_comment_queue_repository import (
 from .http_client import DeviantArtHttpClient
 from .message_randomizer import randomize_template
 from .base_worker_service import BaseWorkerService
+
+if TYPE_CHECKING:
+    from .auth_service import AuthService
 
 
 class CommentPosterService(BaseWorkerService):
@@ -73,13 +76,17 @@ class CommentPosterService(BaseWorkerService):
         return {"valid": True}
 
     def start_worker(
-        self, access_token: str, template_id: int | None = None
+        self,
+        access_token: str,
+        template_id: int | None = None,
+        auth_service: AuthService | None = None,
     ) -> dict[str, object]:
         """Start background worker thread with optional template selection.
 
         Args:
             access_token: OAuth access token for posting comments.
             template_id: Optional template ID to force selection.
+            auth_service: Optional auth service for token refresh.
 
         Returns:
             Status dictionary: {success, message}.
@@ -93,7 +100,11 @@ class CommentPosterService(BaseWorkerService):
                 return {"success": False, "message": "Template is not active"}
 
         # Call base class start_worker
-        return super().start_worker(access_token, template_id)
+        return super().start_worker(
+            access_token,
+            template_id,
+            auth_service=auth_service,
+        )
 
     def get_worker_status(self) -> dict[str, object]:
         """Get worker and queue status.
